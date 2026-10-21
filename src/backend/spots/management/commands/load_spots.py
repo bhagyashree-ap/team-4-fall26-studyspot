@@ -55,6 +55,9 @@ CONTRACT_FIELDS = {
     "subway_step_free",
     "nearby_spots",
     "outdoor_seating",
+    "indoor_seating",
+    "venue_wifi",
+    "opening_hours",
 }
 
 #: Written in batches so that a 2,000-row snapshot is a handful of statements
@@ -121,6 +124,13 @@ def to_spot(record: Any, index: int) -> StudySpot:
         subway_step_free=record.get("subway_step_free"),
         nearby_spots=record.get("nearby_spots", 0),
         outdoor_seating=record.get("outdoor_seating", False),
+        # No default, unlike every boolean above. These three are null for
+        # *unrecorded* rather than for *not applicable*, so a snapshot written
+        # before they existed has to load as unknown and not as false: `False`
+        # would be this loader asserting that nobody can sit inside anywhere.
+        indoor_seating=record.get("indoor_seating"),
+        venue_wifi=record.get("venue_wifi"),
+        opening_hours=record.get("opening_hours"),
     )
 
     try:

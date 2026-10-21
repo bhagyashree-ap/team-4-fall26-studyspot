@@ -135,6 +135,13 @@ class TestEveryContractFieldIsWritten:
             "subway_step_free": "full",
             "nearby_spots": 41,
             "outdoor_seating": True,
+            # The three-state fields, set to the two states the loader has to
+            # carry without a default. A `False` reaching the model as null, or
+            # a null reaching it as False, is exactly the silent drop this test
+            # exists for.
+            "indoor_seating": True,
+            "venue_wifi": False,
+            "opening_hours": "Mo-Fr 07:00-19:00; Sa-Su 08:00-18:00",
         }
         assert set(record) == CONTRACT_FIELDS, "the fixture must cover the whole contract"
 
@@ -142,3 +149,84 @@ class TestEveryContractFieldIsWritten:
 
         for field in CONTRACT_FIELDS:
             assert getattr(spot, field) == record[field], f"{field} was not written"
+
+
+class TestTheThreeStateFieldsLoadAsThreeStates:
+    """`indoor_seating`, `venue_wifi` and `opening_hours` must not take a default.
+
+    Every other boolean in the loader does -- `record.get("free_public_wifi",
+    False)` -- because a snapshot written before that field existed should load
+    as false. These three are the exception: false is a claim here, and a
+    snapshot that does not mention them has to load as unknown. Getting this
+    wrong would silently assert that nobody can sit inside anywhere and that no
+    cafe in the city has Wi-Fi.
+    """
+
+    #: The contract as it stood before these three fields, which is what an
+    #: older snapshot on disk looks like.
+    OLDER_SNAPSHOT_RECORD = {
+        "id": "facdb:older",
+        "name": "Written Before The Fields Existed",
+        "category": "public_library",
+        "address": "1 Test Street, New York, NY 10001",
+        "neighborhood": "Test Neighborhood",
+        "borough": "Manhattan",
+        "latitude": 40.75,
+        "longitude": -73.99,
+        "university": None,
+        "operator": None,
+        "free_public_wifi": False,
+        "no_purchase_needed": True,
+        "subway_station": None,
+        "subway_routes": None,
+        "subway_metres": None,
+        "subway_step_free": None,
+        "nearby_spots": 0,
+        "outdoor_seating": False,
+    }
+
+    def test_a_snapshot_without_them_loads_as_unknown_and_not_as_false(self, db: None) -> None:
+        from spots.management.commands.load_spots import to_spot
+
+        spot = to_spot(dict(self.OLDER_SNAPSHOT_RECORD), 0)
+
+        assert spot.indoor_seating is None
+        assert spot.venue_wifi is None
+        assert spot.opening_hours is None
+
+    def test_an_explicit_false_survives_as_false(self, db: None) -> None:
+        from spots.management.commands.load_spots import to_spot
+
+        # The trustworthy negative: a contributor went and looked. Reading it
+        # back as null would throw away the only Wi-Fi claim in the snapshot
+        # worth anything -- a false `free_public_wifi` only ever meant that no
+        # hotspot the city publishes is within 25 m.
+        record = {**self.OLDER_SNAPSHOT_RECORD, "venue_wifi": False, "indoor_seating": False}
+
+        spot = to_spot(record, 0)
+
+        assert spot.venue_wifi is False
+        assert spot.indoor_seating is False
+
+    def test_an_explicit_null_is_accepted_rather_than_rejected(self, db: None) -> None:
+        from spots.management.commands.load_spots import to_spot
+
+        # full_clean() runs on every row, so a nullable field that was not
+        # declared nullable on the model would fail here rather than at write
+        # time. The importer writes these as null for about 90% of spots.
+        record = {
+            **self.OLDER_SNAPSHOT_RECORD,
+            "indoor_seating": None,
+            "venue_wifi": None,
+            "opening_hours": None,
+        }
+
+        assert to_spot(record, 0).venue_wifi is None
+
+    def test_opening_hours_is_stored_as_written(self, db: None) -> None:
+        from spots.management.commands.load_spots import to_spot
+
+        hours = "Mo-Fr 07:00-19:00; Sa-Su 08:00-18:00"
+        record = {**self.OLDER_SNAPSHOT_RECORD, "opening_hours": hours}
+
+        assert to_spot(record, 0).opening_hours == hours

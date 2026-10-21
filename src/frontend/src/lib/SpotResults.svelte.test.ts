@@ -36,7 +36,10 @@ const SPOT: StudySpot = {
 	subway_metres: 409,
 	subway_step_free: 'full',
 	nearby_spots: 41,
-	outdoor_seating: false
+	outdoor_seating: false,
+	indoor_seating: null,
+	venue_wifi: null,
+	opening_hours: null
 };
 
 describe('a result card', () => {
@@ -114,5 +117,60 @@ describe('the card as a link', () => {
 
 		const hit = topmostAt(maps.element());
 		expect(hit?.closest('a')?.getAttribute('href')).toContain('google.com/maps');
+	});
+});
+
+describe('the indoor-seating badge', () => {
+	/**
+	 * Three states, and only one of them is a badge.
+	 *
+	 * `indoor_seating` is true, false, or unrecorded, and the card has room for
+	 * the good news only — so the test that matters is not that a true shows a
+	 * badge, it is that a *recorded no* and an *unrecorded* both show nothing
+	 * and are never confused with each other. A truthiness check would pass the
+	 * first test here and fail the second two silently.
+	 */
+	it('appears when somebody has recorded somewhere to sit inside', async () => {
+		render(SpotResults, {
+			spots: [{ ...SPOT, indoor_seating: true }],
+			total: 1,
+			hasMore: false
+		});
+
+		await expect.element(page.getByText('Indoor seating')).toBeInTheDocument();
+	});
+
+	it('does not appear when somebody has recorded that there is nowhere', async () => {
+		render(SpotResults, {
+			spots: [{ ...SPOT, indoor_seating: false }],
+			total: 1,
+			hasMore: false
+		});
+
+		await expect.element(page.getByText('Bobst Library')).toBeInTheDocument();
+		await expect.element(page.getByText('Indoor seating')).not.toBeInTheDocument();
+	});
+
+	it('does not appear when nobody has recorded it, which is most places', async () => {
+		// About 112 spots of 3,772 carry a true. Padding that by inferring
+		// seating from anything else is exactly what this field is not for.
+		render(SpotResults, { spots: [{ ...SPOT, indoor_seating: null }], total: 1, hasMore: false });
+
+		await expect.element(page.getByText('Bobst Library')).toBeInTheDocument();
+		await expect.element(page.getByText('Indoor seating')).not.toBeInTheDocument();
+	});
+
+	it('says nothing about the venue’s own Wi-Fi, which the card has no room for', async () => {
+		// venue_wifi and free_public_wifi are different claims, and a card that
+		// showed both would have to explain the difference in the space of a
+		// badge. The detail page does that instead.
+		render(SpotResults, {
+			spots: [{ ...SPOT, venue_wifi: false, free_public_wifi: true }],
+			total: 1,
+			hasMore: false
+		});
+
+		await expect.element(page.getByText('Free public Wi-Fi')).toBeInTheDocument();
+		await expect.element(page.getByText(/no Wi-Fi|Wi-Fi for customers/i)).not.toBeInTheDocument();
 	});
 });

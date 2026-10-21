@@ -84,6 +84,12 @@ test:
 ingest-subway:
     cd data && uv run --project ../src/backend python subway.py
 
+# Refresh the OpenStreetMap cafe list the importer merges over DOHMH. Rarely
+# needed: the output is committed. One Overpass request takes about 45 seconds
+# against a volunteer-run service, which is why it is not part of `just ingest`.
+ingest-osm:
+    cd data && uv run --project ../src/backend python osm.py
+
 # End-to-end tests against a running deployment. Needs STUDYSPOT_E2E_URL; see
 # tests/e2e/README.md. Deliberately outside `just test`, which must pass with
 # nothing running.
@@ -168,10 +174,38 @@ aws-load:
     aws lambda invoke --function-name "$({{tf}} output -raw manage_function_name)" \
       --payload '{"command":"load_spots"}' --cli-binary-format raw-in-base64-out /dev/stdout
 
+# Extract the NYC basemap from the Protomaps daily planet build.
+#
+# About 31 MB at maxzoom 14, which MapLibre overzooms past for the close-in
+# views the detail pages use. Zoom 15 would be 103 MB for sharper labels.
+#
+# The planet builds expire after roughly two weeks, so this takes a date rather
+# than hardcoding one that will rot. Needs the pmtiles CLI: `brew install
+# pmtiles`. Writes to infra/build/, which is gitignored -- a basemap does not
+# belong in the repository.
+tiles-build date:
+    pmtiles extract "https://build.protomaps.com/{{date}}.pmtiles" \
+      infra/build/nyc.pmtiles --bbox=-74.30,40.47,-73.68,40.93 --maxzoom=14
+
+# Upload the basemap to the site bucket.
+#
+# The same bucket and distribution as the site, so the browser fetches it
+# same-origin and no CORS configuration is needed. It is served by HTTP range
+# request: a reader downloads the handful of tiles in view, not the 31 MB.
+#
+# `aws-frontend` excludes this prefix from its `--delete`, or every frontend
+# deploy would remove it.
+aws-tiles:
+    aws s3 cp infra/build/nyc.pmtiles \
+      "s3://$({{tf}} output -raw site_bucket)/tiles/nyc.pmtiles" \
+      --content-type application/octet-stream \
+      --cache-control 'public, max-age=604800'
+
 # Build the static frontend, publish it, and invalidate the CloudFront cache.
 aws-frontend:
     cd src/frontend && bun run build
-    aws s3 sync src/frontend/build/ "s3://$({{tf}} output -raw site_bucket)/" --delete
+    aws s3 sync src/frontend/build/ "s3://$({{tf}} output -raw site_bucket)/" --delete \
+      --exclude 'tiles/*'
     aws cloudfront create-invalidation \
       --distribution-id "$({{tf}} output -raw cloudfront_distribution_id)" --paths '/*'
 

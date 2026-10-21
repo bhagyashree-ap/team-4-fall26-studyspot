@@ -3,12 +3,15 @@
 This directory is the small boundary between NYC Open Data and StudySpot:
 
 ```text
-NYC Open Data -> ingest.py -> spots.json
+NYC Open Data  -\
+osm_cafes.json --- ingest.py -> spots.json
 ```
 
 - `ingest.py` downloads NYC Open Data and normalizes it into the shared contract.
 - `spots.json` is the canonical generated dataset consumed by the application.
-- `test_ingest.py` tests the mapping.
+- `osm.py` fetches the OpenStreetMap cafés from the Overpass API, and `osm_cafes.json` is what it
+  last wrote. Separate from `ingest.py` and committed, like `subway_stations.json`.
+- `test_ingest.py` and `test_osm.py` test the mapping.
 - `fixtures/` is a trimmed copy of what the upstream datasets return, so the tests and
   `--fixtures` need no network.
 
@@ -48,6 +51,11 @@ importer folds it down to the most recent inspection of each `camis`. The most r
 one whose `action` says whether the place is currently closed and whose address and geocode are
 the freshest the city has. `dba` and `(building, street)` are constant within every `camis` in the
 dataset, so no choice of row here could change a published name or address.
+
+Cafés also come from [OpenStreetMap][osm] by way of the [Overpass API][overpass], queried for
+`amenity=cafe` inside the city's bounding box — 3,011 records, of which 2,978 have a name and
+reach `osm_cafes.json`. That is what the `osm:` prefix refers to. The source is **additive**: see
+"OpenStreetMap is additive, and the join is the dangerous part" below.
 
 Sidewalk-dining licences come from [Dining Out NYC][dining] (`fpeh-f7ci`), read for the
 `outdoor_seating` attribute alone. Only `Issued` `Sidewalk` licences: the register also carries
@@ -96,6 +104,114 @@ pavement tables meant no licence and so no row.
 Regenerating against DOHMH took that measure from 272 names reading as a bar, pub, pizzeria or
 restaurant down to 28, on a set of cafés 31% larger.
 
+### What it cost, and what OpenStreetMap gets back
+
+Precision rose and recall fell. A cuisine code is one value per establishment chosen from a fixed
+list, so a café that sells sandwiches can be filed under something else — *Caffe Reggio*, open on
+MacDougal Street since 1927, is recorded as `Italian`. Filtering on `Coffee/Tea` loses it, and it
+went missing from the live site. That regression is why OpenStreetMap is read.
+
+## OpenStreetMap is additive, and the join is the dangerous part
+
+`amenity=cafe` is a human judgement about what a place *is*, which is the question the category
+asks, rather than a code about what its kitchen serves. It is not a name match either, which was
+the other option and was rejected: a name says nothing about whether somewhere is a study spot,
+and matching café words in a business name pulls in every deli called *Cafe Metro*. OSM does not
+have that problem because it tags a deli as `shop=deli` — of 3,011 `amenity=cafe` records in the
+city, 15 have "deli", "bodega" or "grocery" anywhere in the name.
+
+**This source only ever adds.** DOHMH remains the spine for which establishments exist and where:
+all 2,158 of its cafés are still in the snapshot, unrenamed, unmoved and unrecategorized. The café
+source has been swapped once already and it cost real records; this was written so that it could
+not. `TestOpenStreetMapIsAdditive` in `test_ingest.py` holds that line field by field.
+
+A wrong join silently attaches one venue's attributes to another, which has happened on this
+project before. So a match needs the normalized name **and** the location to agree, never one
+alone:
+
+- name and street address both agree, and the two geocodes are within 200 m, or
+- the name agrees and the two points are within 150 m.
+
+150 m is measured rather than chosen. Among the 438 pairs that agree on name *and* address, the
+two sources' geocodes sit a median 18 m apart, 90% within 49 m and 95% within 68 m — so an OSM
+*Starbucks* 150 m from a DOHMH *Starbucks* is that Starbucks, while one 400 m away is a different
+branch that must not inherit its hours. A record two establishments both answer, or an
+establishment two records both claim, joins to neither: one of the two would be wrong and nothing
+says which.
+
+An unmatched record is then tested the other way round, because the risk turns over — publishing
+it could duplicate a café the snapshot already has under a differently-spelled name. 496 OSM cafés
+sit within 30 m of a DOHMH café whose name does not match, and reading forty of them by hand,
+about half are one business written two ways — *La Colombe Coffee Roasters* and *La Colombe*,
+*Coffee Project New York* and *Coffee Project NY*, *Devoción* and *Devocion* — while the other half
+are two businesses next door: *Rise Brewing Company* at 79 Delancey and *Starbucks* at 80,
+*Grabstein's Bagels* at 651 Broadway and *Gregory's Coffee* at 649. Proximity cannot tell those
+apart, so the street address does: within 75 m of a DOHMH café, an OSM record is published only
+when both carry an address and the two differ. Otherwise it is dropped.
+
+75 m is that same 95th percentile — how far one storefront can appear to move between the two
+registers. Past it, two records are two places.
+
+Against the live data: **649 enriched, 1,352 published as new spots, 600 dropped as ambiguous**,
+377 outside the city and 33 with no name. The 377 are the Overpass bounding box being a rectangle
+where the city is not — it reaches into Essex County and Westchester, and the neighborhood
+boundary polygons keep those out exactly as they do for DOHMH, after `NYC_BOUNDS` has had its
+cheaper go first.
+
+Dropping 600 costs recall, which is what this source was added for, so the trade is worth stating:
+the alternative is a second pin for one café, twice in the result list, two detail pages, and both
+of them half right.
+
+### Three fields where `null` is an answer
+
+`indoor_seating`, `venue_wifi` and `opening_hours` are the only fields in the contract where
+`null` means *nobody has recorded this* rather than *this record has no such thing*. **Nothing may
+read `null` as `false`.** Everywhere else a null is an absence of the thing and reading it as a
+negative is harmless; here it is the difference between "somebody went and looked and there is no
+Wi-Fi" and "nobody has said", and telling those apart is the whole point.
+
+| field | true | false | unrecorded |
+| --- | --- | --- | --- |
+| `indoor_seating` | 112 | 13 | 3,647 |
+| `venue_wifi` | 295 | 42 | 3,435 |
+| `opening_hours` | 1,134 recorded | — | 2,638 |
+
+`venue_wifi` comes from `internet_access`, where `wlan`, `yes` and `wifi` are true and `no` is
+false. `wired` and `terminal` read as unrecorded, not as false: an ethernet port and a public
+computer each say there is internet without saying whether there is Wi-Fi. A value nobody has
+thought about reads as unrecorded too, because the mapping is a table rather than a truthiness
+test.
+
+**`venue_wifi` is not `free_public_wifi` and is deliberately a separate field.** One is the Wi-Fi
+the venue provides; the other is a hotspot *the city publishes* within 25 m of the point, usually
+a library's own and occasionally a LinkNYC kiosk on the pavement. A café can have the first and
+not the second, and a library the reverse. Their falses are also worth different amounts: a false
+`venue_wifi` is a trustworthy negative, while a false `free_public_wifi` only ever meant that
+nothing the city publishes is nearby.
+
+`opening_hours` is OSM's own syntax, stored as written — `Mo-Fr 07:00-19:00; Sa-Su 08:00-18:00`.
+Deliberately **not** turned into an "open now": evaluating it needs a timezone and the
+public-holiday calendar the syntax can refer to, and sending somebody to a closed café is worse
+than telling them nothing.
+
+OSM's own `outdoor_seating` tag is **not** read. The snapshot already has a field by that name
+meaning something narrower and checkable — a Dining Out licence matching a name and an address —
+and filling it from a source with a different meaning would quietly change what it claims. OSM's
+version also arrives as nineteen distinct values, from `sidewalk;street` to `bench`, which is not
+a boolean.
+
+### Refreshing it
+
+```shell
+just ingest-osm
+```
+
+Rarely needed: the output is committed. One Overpass request takes about 45 seconds against a
+volunteer-run service that sheds load by returning 429 and 504 under pressure, which is why it is
+not part of `just ingest` and why a build does not depend on it. `osm.py` refuses a result with
+fewer than 2,000 cafés rather than publishing what looks like a truncated answer — the committed
+file is still good, and a snapshot quietly missing two thousand cafés is not.
+
 ### `outdoor_seating` is a join, and a strict one
 
 A Dining Out licence sets `outdoor_seating` on a café when the licence's name *and* street address
@@ -114,6 +230,40 @@ The two registers spell an address differently and neither is wrong — DOHMH st
 `HICKS STREET` in separate columns where Dining Out stores `102 HICKS STREET` — so street types,
 compass directions and ordinals are folded to one form before comparing. Those match keys are
 never published.
+
+## A curated building beats the open-data row describing it
+
+FacDB registers *New York University Libraries* as an academic library at Bobst's coordinates,
+12 m from the curated `nyu:bobst-library`, with the **building name where a street address
+belongs** — "Elmer H Bobst Library, New York, NY 10012" — and "LIU-New York University Campus",
+which is Long Island University, as its campus. A search for "bobst" returned both records,
+because the search vector includes the address. The curated record wins: it has the real street
+address and the right university.
+
+Three conditions, and each one is there because dropping it costs real records.
+
+**Same category.** Nine non-curated records sit within 60 m of a curated building in the live
+data and all nine are cafés — *Peet's Coffee @ NYU* 10 m from the Kimmel Center, *Blank Street
+Coffee* 26 m from Rogers Hall, *The Uncommons* 24 m from the Global Center, *Think Coffee* 37 m
+from Courant. They are cafés inside or beside the building and they are separate study spots. A
+rule that went on distance alone would delete all nine to fix one duplicate.
+
+**Within 50 m.** Two records of one category across the street are two places.
+
+**No house number in the address.** This is the condition that is easy to leave out, and leaving
+it out costs a real record. *Two* academic libraries sit within 50 m of Bobst: the generic FacDB
+row above, and *NYU Tamiment Library* at 17 m — the Tamiment Library and Robert F. Wagner Labor
+Archives, a named special collection on Bobst's tenth floor, publishing its own street address.
+Same category, well inside the radius, and not a duplicate of anything.
+
+So the test is not "is it near the building" but **"does it claim an address of its own"**. A row
+that cannot say what street it is on, sitting on a curated building of the same kind, has recorded
+that building. A row with a street address is asserting a place, and is kept even when the street
+is the curated record's own — Tamiment is at Bobst's address, because it is on Bobst's tenth
+floor.
+
+One record is dropped in the live data, and the importer names it on stderr rather than deleting
+it quietly.
 
 ## Subway stations
 
@@ -218,6 +368,8 @@ hundred and sixty-nine metres is what the data says about "125th Street Library"
 University - Harlem", and it says nothing more than that.
 
 [dining]: https://data.cityofnewyork.us/resource/fpeh-f7ci
+[osm]: https://www.openstreetmap.org/
+[overpass]: https://overpass-api.de/
 [dohmh]: https://data.cityofnewyork.us/resource/43nn-pn8j
 [subway]: https://data.ny.gov/resource/39hk-dx4f
 [facdb]: https://data.cityofnewyork.us/City-Government/Facilities-Database/ji82-xba5

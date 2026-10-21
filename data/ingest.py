@@ -3,7 +3,7 @@
 .. code-block:: text
 
     NYC Open Data ---\
-                      ingest.py -> spots.json
+    osm_cafes.json ----- ingest.py -> spots.json
     nyu_buildings.json /
 
 Run it through just, which writes ``data/spots.json`` in place::
@@ -17,7 +17,7 @@ changes; nothing writes to ``spots.json`` at runtime.
 Where the records come from
 ---------------------------
 
-Five sources. The first is the city's Facilities Database (FacDB, Socrata
+Six sources. The first is the city's Facilities Database (FacDB, Socrata
 ``ji82-xba5``), which is what the ``facdb:`` identifier prefix refers to. Two
 subsets of it are places a student might read in -- the ``LIBRARIES`` facility
 group and the ``COLLEGES OR UNIVERSITIES`` subgroup.
@@ -49,6 +49,16 @@ matches at 25 m are overwhelmingly hotspots the libraries themselves run, while
 widening it to 100 m starts counting LinkNYC kiosks on the street, which is not
 Wi-Fi anyone can use sitting down.
 
+The sixth is ``osm_cafes.json``, the OpenStreetMap cafes written by ``osm.py``
+from the Overpass API, which the ``osm:`` prefix refers to. It is **additive**:
+DOHMH remains the spine for which establishments exist and where they are, and
+OSM adds three attributes to the ones it can identify plus the cafes DOHMH files
+under some other cuisine. ``osm.py``'s docstring says why a second cafe source
+was needed and this one has the join; the short version is that
+``cuisine_description`` is a food-safety code and ``amenity=cafe`` is a judgement
+about what a place is, so Caffe Reggio -- on MacDougal Street since 1927, filed
+by DOHMH as ``Italian`` -- is in one and not the other.
+
 Neighborhood names and borough come from the 2020 Neighborhood Tabulation Areas
 (``9nt8-h7nd``), which is read two different ways. FacDB publishes the NTA code
 but not its name, so a facility's neighborhood is a dictionary lookup on
@@ -64,11 +74,29 @@ a spot came from.
 correct rather than missing: those buildings have Wi-Fi that needs NYU
 credentials, and the field answers whether *anyone* can use it.
 
-No source lists hours, noise, or power outlets. The city publishes a link to
-each Queens branch's page and a weekly total of open hours for NYPL branches,
-neither of which is a schedule, so "open now" is not derivable. No source lists
-access conditions either, and the contract has no field for one: several
-curated buildings require a university ID to enter.
+No *city* source lists hours, noise, or power outlets. The city publishes a link
+to each Queens branch's page and a weekly total of open hours for NYPL branches,
+neither of which is a schedule. OpenStreetMap does carry an ``opening_hours``
+for about half its cafes, which is why ``opening_hours`` is now a field -- and it
+is published as the raw OSM string rather than turned into an "open now", which
+needs a timezone and the public-holiday calendar the syntax can refer to. No
+source lists noise, outlets, or access conditions, and the contract has no field
+for any of them: several curated buildings require a university ID to enter.
+
+Three states, not two
+---------------------
+
+``indoor_seating``, ``venue_wifi`` and ``opening_hours`` are the only fields in
+the contract that are null for *unrecorded* rather than for *not applicable*,
+and nothing downstream may collapse the two. ``venue_wifi = false`` is a
+contributor who went and looked and found no Wi-Fi; ``venue_wifi = null`` is
+nobody having said. That distinction is the reason OpenStreetMap is read at all,
+and it is also why ``venue_wifi`` is a separate field from
+``free_public_wifi`` rather than merged into it. They are different claims:
+``venue_wifi`` is the venue's own Wi-Fi, and ``free_public_wifi`` is a hotspot
+*the city publishes* within 25 m of the point, which is usually a library's own
+and occasionally a LinkNYC kiosk. A cafe can easily have the first and not the
+second.
 
 What a cafe is
 --------------
@@ -251,6 +279,56 @@ OUTDOOR_DINING_WHERE = "license_status = 'Issued' AND license_type = 'Sidewalk'"
 SOURCE_PREFIX = "facdb"
 CAFE_PREFIX = "dohmh"
 
+#: OpenStreetMap cafes, written by ``osm.py``. The ``osm:`` identifier prefix
+#: names this source.
+#:
+#: Not fetched here. One Overpass request takes about 45 seconds against a
+#: volunteer-run service, so it is committed and refreshed on its own, the way
+#: the subway station list is. See ``osm.py`` for what the source is and why it
+#: is read at all.
+OSM_CAFES_PATH = HERE / "osm_cafes.json"
+OSM_PREFIX = "osm"
+
+#: How far apart a DOHMH establishment and an OSM cafe that agree on **name and
+#: street address** may be and still be taken for the same storefront.
+#:
+#: A backstop, exactly like :data:`OUTDOOR_MATCH_RADIUS_METRES`: the match is the
+#: name and the address agreeing, and this only rejects a pair whose two
+#: geocodes disagree so badly that one of them must be wrong. Of the 438 pairs
+#: that agree on both, one is 1,340 m apart and it is the only one past this.
+OSM_ADDRESS_MATCH_RADIUS_METRES = 200.0
+
+#: How close an OSM cafe that agrees on **name alone** has to be before the name
+#: is taken as identifying the same business.
+#:
+#: Name alone is not a storefront, and for a chain it is barely a hint: there are
+#: over a hundred Starbucks in the register and the name tells them apart not at
+#: all. Measured instead: among the pairs that agree on name *and* address, the
+#: two sources' geocodes sit a median 18 m apart, 90% within 49 m and 95% within
+#: 68 m. 150 m is past all but the long tail of that, which is the point -- an
+#: OSM "Starbucks" 150 m from a DOHMH "Starbucks" is that Starbucks, while one
+#: 400 m away is a different branch and must not inherit its attributes.
+OSM_NAME_MATCH_RADIUS_METRES = 150.0
+
+#: How close a DOHMH cafe has to be before an *unmatched* OSM cafe is treated as
+#: possibly the same storefront under a different name, and skipped.
+#:
+#: This is the whole of the duplicate problem. 496 OSM cafes sit within 30 m of a
+#: DOHMH cafe whose name does not match, and reading forty of them by hand, about
+#: half are plainly one business written two ways -- "La Colombe Coffee Roasters"
+#: and "La Colombe", "Coffee Project New York" and "Coffee Project NY",
+#: "Devoción" and "Devocion" -- while the other half are plainly two businesses
+#: next door to each other: "Rise Brewing Company" at 79 Delancey and
+#: "Starbucks" at 80, "Grabstein's Bagels" at 651 Broadway and "Gregory's
+#: Coffee" at 649. Proximity cannot tell those apart, so :func:`merge_osm_cafes`
+#: uses the street address to, and falls back to skipping.
+#:
+#: 75 m is the 95th percentile of how far the two sources' geocodes sit apart
+#: for a pair that agrees on name and address -- that is, how far one storefront
+#: can appear to move between the two registers. Past it, two records are two
+#: places.
+OSM_SAME_STOREFRONT_METRES = 75.0
+
 #: The category every DOHMH ``Coffee/Tea`` establishment takes.
 CAFE_CATEGORY = "cafe"
 
@@ -262,6 +340,14 @@ CAFE_CATEGORY = "cafe"
 #: actually study in. These ten are recorded by hand from public building
 #: information. They are the reason the snapshot has campus study space at all.
 CURATED_PATH = HERE / "nyu_buildings.json"
+
+#: The identifier prefix the curated buildings carry.
+#:
+#: Named here rather than only in the JSON because two things now depend on
+#: knowing which records were written by hand: :func:`curated_spots` checks
+#: them against the contract, and :func:`drop_curated_duplicates` lets them win
+#: against an open-data record describing the same building.
+CURATED_PREFIX = "nyu"
 
 #: The station list written by subway.py. Not a study-spot source: it exists so
 #: every spot can say which trains are near it.
@@ -281,7 +367,7 @@ WALKING_METRES_PER_MINUTE = 80.0
 #: How far counts as "around here" when counting a spot's neighbours.
 #:
 #: About a five-minute walk. The medians it produces separate the boroughs
-#: cleanly -- Manhattan 23, Brooklyn 6, Queens 3, Bronx 1, Staten Island 0 --
+#: cleanly -- Manhattan 32, Brooklyn 9, Queens 6, Bronx 1, Staten Island 2 --
 #: which is what a reader would recognise as the difference between a dense
 #: stretch and an isolated branch.
 NEARBY_RADIUS_METRES = 400.0
@@ -321,7 +407,22 @@ CONTRACT_FIELDS = (
     "subway_step_free",
     "nearby_spots",
     "outdoor_seating",
+    "indoor_seating",
+    "venue_wifi",
+    "opening_hours",
 )
+
+#: The three fields that come from OpenStreetMap, and the only three in the
+#: contract that are ``None`` for *unrecorded* rather than for *not applicable*.
+#:
+#: Every other nullable field is null because the record has no such thing: a
+#: cafe has no operator, a spot with no station within 1.2 km has no station.
+#: These three are null because nobody has written the answer down, and the
+#: difference is the reason OSM is read. ``internet_access = no`` is somebody
+#: who went and looked; ``free_public_wifi = false`` only ever meant that no
+#: hotspot the city publishes is within 25 m. Collapsing unknown into false
+#: would turn the absence of evidence into a claim.
+OSM_FIELDS = ("indoor_seating", "venue_wifi", "opening_hours")
 
 #: Categories where sitting down costs nothing.
 #:
@@ -519,6 +620,23 @@ STREET_WORDS = {
 
 #: "5TH" and "5" are the same street. Dining Out writes one and DOHMH the other.
 MATCH_ORDINAL = re.compile(r"^(\d+)(?:ST|ND|RD|TH)$")
+
+#: How close a non-curated record sits to a curated building before it is
+#: considered for being the same place.
+#:
+#: Deliberately small, and it is only half the test. See
+#: :func:`drop_curated_duplicates` for the other half and for why distance
+#: alone would delete nine good records to fix one duplicate.
+CURATED_DUPLICATE_METRES = 50.0
+
+#: Whether a published address begins with a house number, and so is a street
+#: address rather than something else.
+#:
+#: FacDB puts a building name in the address column when it has no street for a
+#: record -- "Elmer H Bobst Library, New York, NY 10012". That is the signature
+#: of a row describing a *building* the curated list already covers, as opposed
+#: to a place with an address of its own.
+HOUSE_NUMBER = re.compile(r"^\s*\d")
 
 #: Everything that is not a letter, a digit or a space, for match keys only.
 #:
@@ -1247,7 +1365,373 @@ def cafe_spot(
         "subway_step_free": None,
         "nearby_spots": 0,
         "outdoor_seating": has_outdoor_seating(record, latitude, longitude, index),
+        # Unrecorded until an OSM cafe is matched to this establishment by
+        # merge_osm_cafes(). DOHMH inspects kitchens; it has no reason to know
+        # whether there is somewhere to sit or Wi-Fi to use, and 1,721 of the
+        # 2,158 establishments keep all three as null -- 437 are matched and
+        # the rest are not. Null is the honest value: see OSM_FIELDS.
+        "indoor_seating": None,
+        "venue_wifi": None,
+        "opening_hours": None,
     }
+
+
+@dataclass(frozen=True)
+class CafeIdentity:
+    """A published cafe's name and street address, normalized for the OSM join.
+
+    Built where the DOHMH row is still in hand rather than re-derived from the
+    published record: :func:`cafe_address` appends ", NY 10012" for
+    presentation, and taking that apart again to match on it would mean two
+    spellings of one key and two places for them to disagree.
+    """
+
+    name: str
+    address: str
+
+
+@dataclass
+class OsmMerge:
+    """What :func:`merge_osm_cafes` did, for the importer to report.
+
+    Every OSM record lands in exactly one of these, and the numbers are meant
+    to be read: ``ambiguous`` being large is not a bug, it is the join refusing
+    to guess. See :data:`OSM_SAME_STOREFRONT_METRES`.
+    """
+
+    #: DOHMH cafes that an OSM record identified and added attributes to.
+    enriched: int = 0
+    #: OSM cafes published as spots of their own, because nothing matched them
+    #: and nothing was close enough to be them.
+    added: int = 0
+    #: OSM cafes dropped because they might be a DOHMH cafe and might not.
+    ambiguous: int = 0
+    #: OSM cafes outside :data:`NYC_BOUNDS`, or inside it and outside every
+    #: neighborhood boundary. The Overpass bounding box is a rectangle and the
+    #: city is not: the cafe at Turtle Back Zoo in West Orange, New Jersey is
+    #: inside the box.
+    unplaceable: int = 0
+
+
+def osm_cafes(path: Path = OSM_CAFES_PATH) -> list[dict[str, Any]]:
+    """The committed OSM cafe list, or an empty list when it has not been built.
+
+    A warning rather than an error, the way :func:`subway_stations` is. Without
+    it the snapshot is what it was before OSM was read -- DOHMH cafes with three
+    unrecorded fields -- which is a smaller snapshot rather than a broken one.
+    """
+    if not path.exists():
+        warn(f"no {path.name}; cafes will publish no OSM attributes. Run `just ingest-osm`.")
+        return []
+    cafes = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(cafes, list):
+        raise IngestError(f"{path} must contain a JSON array of cafes.")
+    return cafes
+
+
+def osm_source(fixtures: Path | None) -> list[Any]:
+    """The OSM cafes: the fixture sample under ``--fixtures``, the committed file otherwise.
+
+    Unlike the subway list, which :func:`main` reads from the repository in
+    either mode, this one changes how many records the snapshot has. A fixture
+    run that read the real 2,978 would merge the whole city into eight
+    establishments, and the suite would be testing a snapshot nobody ships.
+    """
+    if fixtures is not None:
+        return osm_cafes(fixtures / f"{OSM_CAFES_PATH.name}")
+    return osm_cafes(OSM_CAFES_PATH)
+
+
+def osm_address(record: dict[str, Any]) -> str | None:
+    """The address as the contract publishes it, or ``None``.
+
+    The same shape :func:`cafe_address` produces, so a cafe reads the same
+    whichever source it came from. Not title-cased, unlike every FacDB and DOHMH
+    string: OSM is written by people in mixed case already, and ``title_case``
+    would turn "MacDougal Street" into "Macdougal Street" -- which is what DOHMH
+    publishes and what the one source that gets it right does not.
+
+    A house number without a street is not an address. 2,140 of the 2,978 cafes
+    carry a street and 412 of the ones this importer publishes carry neither,
+    which is why the field is nullable in the first place.
+    """
+    street = text(record.get("street"))
+    if street is None:
+        return None
+
+    house_number = text(record.get("house_number"))
+    parts = [f"{house_number} {street}" if house_number else street]
+    postcode = text(record.get("postcode"))
+    parts.append(f"NY {postcode}" if postcode else "NY")
+    return ", ".join(parts)
+
+
+def osm_address_key(record: dict[str, Any]) -> str:
+    """One OSM cafe's street address for the join, or ``""`` when it has none.
+
+    **Both the house number and the street, or nothing.** A street on its own is
+    not a storefront: "Broadway" cannot be compared with "123 Broadway" to
+    decide whether two records are the same door, and letting it try would make
+    the comparison *disagree* -- which is what the merge reads as evidence of
+    two separate places. 26 of the 2,978 cafes carry a street with no number and
+    7 a number with no street; they join on name and proximity like the 831 that
+    carry neither, which is the right answer rather than a concession.
+
+    The DOHMH side is built the same way in :func:`normalize`, except that a
+    DOHMH establishment with no street has already been dropped by
+    :func:`cafe_address`.
+    """
+    house_number = text(record.get("house_number"))
+    street = text(record.get("street"))
+    if house_number is None or street is None:
+        return ""
+    return match_key(f"{house_number} {street}")
+
+
+def osm_attributes(record: dict[str, Any]) -> dict[str, Any]:
+    """The three OSM fields, each true, false, or ``None`` for unrecorded.
+
+    ``osm.py`` has already reduced the tags to these three states, so this only
+    refuses a value that is not one of them. A contributed dataset read through
+    a committed file is exactly where a hand-edit puts a string where a boolean
+    belongs, and a stray ``"yes"`` would reach the model as ``True``.
+    """
+    attributes: dict[str, Any] = {}
+    for field in OSM_FIELDS:
+        value = record.get(field)
+        if field == "opening_hours":
+            attributes[field] = text(value)
+            continue
+        if value is not None and not isinstance(value, bool):
+            raise IngestError(
+                f"OSM cafe {record.get('id')!r} has a non-boolean {field}: {value!r}."
+            )
+        attributes[field] = value
+    return attributes
+
+
+def osm_spot(
+    record: dict[str, Any],
+    name: str,
+    latitude: float,
+    longitude: float,
+    area: NtaArea,
+) -> dict[str, Any]:
+    """Map one OSM cafe onto the contract, as a spot of its own.
+
+    Reached only for a record that matched no DOHMH establishment and had none
+    close enough to be, so this is a cafe the health department files under some
+    other cuisine -- Caffe Reggio, on MacDougal Street since 1927, which DOHMH
+    records as ``Italian``.
+
+    It is published on OSM's word alone, which is worth being clear about:
+    ``amenity=cafe`` is a contributor's judgement and nothing re-checks that the
+    place is still open. See the "What this does not establish" section of
+    ``osm.py``.
+    """
+    return {
+        "id": f"{OSM_PREFIX}:{record['id']}",
+        "name": name,
+        "category": CAFE_CATEGORY,
+        "address": osm_address(record),
+        "neighborhood": area.name,
+        "borough": area.borough,
+        "latitude": latitude,
+        "longitude": longitude,
+        # A cafe is a third place in its own right, not somewhere reached
+        # through a campus. The same rule the DOHMH cafes follow.
+        "university": None,
+        # OSM has an `operator` tag, and it is deliberately not read. It is
+        # filled for a chain outlet and for the Turtle Back Zoo cafe and empty
+        # for the independents, and the field means "who runs the place, where
+        # the city records it" -- this would be somewhere else recording it.
+        "operator": None,
+        # Filled in by normalize(), from the rest of the snapshot.
+        "free_public_wifi": False,
+        # A cafe is where you buy something.
+        "no_purchase_needed": False,
+        # Filled in by combine(), the only point that sees every published spot.
+        "subway_station": None,
+        "subway_routes": None,
+        "subway_metres": None,
+        "subway_step_free": None,
+        "nearby_spots": 0,
+        # No Dining Out licence was matched, because the join runs on DOHMH
+        # establishments and this is not one. False here means what it means
+        # everywhere: no licence matched. OSM's own `outdoor_seating` is not
+        # read into it -- see osm.py for why a field that already has a narrow,
+        # checkable meaning is not filled from a source with a different one.
+        "outdoor_seating": False,
+        **osm_attributes(record),
+    }
+
+
+def point_grid(
+    spots: list[dict[str, Any]],
+) -> dict[tuple[float, float], list[dict[str, Any]]]:
+    """Spots bucketed onto a hundredth-of-a-degree grid, for proximity lookups.
+
+    The same grid :func:`assign_nearby` builds, and usable for any radius up to
+    about 850 m: a cell is roughly 1.1 km north-south and 850 m east-west in New
+    York, so the eight neighbouring cells cover everything that close.
+    """
+    grid: dict[tuple[float, float], list[dict[str, Any]]] = {}
+    for spot in spots:
+        grid.setdefault((round(spot["latitude"], 2), round(spot["longitude"], 2)), []).append(spot)
+    return grid
+
+
+def within(
+    latitude: float,
+    longitude: float,
+    grid: dict[tuple[float, float], list[dict[str, Any]]],
+    radius: float,
+) -> list[dict[str, Any]]:
+    """Every gridded spot within ``radius`` metres of a point."""
+    found: list[dict[str, Any]] = []
+    for delta_latitude in (-0.01, 0.0, 0.01):
+        for delta_longitude in (-0.01, 0.0, 0.01):
+            cell = (
+                round(latitude + delta_latitude, 2),
+                round(longitude + delta_longitude, 2),
+            )
+            for spot in grid.get(cell, ()):
+                if (
+                    haversine_metres(latitude, longitude, spot["latitude"], spot["longitude"])
+                    <= radius
+                ):
+                    found.append(spot)
+    return found
+
+
+def merge_osm_cafes(
+    cafes: list[dict[str, Any]],
+    identities: dict[str, CafeIdentity],
+    records: list[Any],
+    areas: list[NtaArea],
+) -> tuple[list[dict[str, Any]], OsmMerge]:
+    """Enrich the DOHMH cafes from OSM, and return the cafes OSM alone knows.
+
+    **Additive and never substitutive.** DOHMH decides which establishments
+    exist and what their addresses are; this adds attributes to the ones OSM can
+    identify and publishes the ones it cannot match as spots of their own. No
+    DOHMH record is dropped, renamed, moved or recategorized here.
+
+    Matching is the dangerous part, and the asymmetry is the same one
+    :func:`outdoor_dining_index` is written around: a cafe missing its OSM
+    attributes reads as three unrecorded fields, which is exactly what they
+    mean, while a cafe credited with *another business's* opening hours is a
+    false statement about a real place. This project has already shipped a wrong
+    join once, on ``operator``.
+
+    So a match needs the normalized name **and** the location to agree, never
+    one alone:
+
+    * name and street address both agree, and the two geocodes are within
+      :data:`OSM_ADDRESS_MATCH_RADIUS_METRES` of each other, or
+    * the name agrees and the two points are within
+      :data:`OSM_NAME_MATCH_RADIUS_METRES`.
+
+    An OSM record that two DOHMH cafes both answer, or a DOHMH cafe that two OSM
+    records both claim, is ambiguous and neither is joined -- one of the two
+    would be wrong and nothing here says which.
+
+    An OSM record that matched nothing is then tested the other way round,
+    because the risk has turned over: publishing it would duplicate a cafe
+    already in the snapshot under a differently-spelled name. If a DOHMH cafe
+    sits within :data:`OSM_SAME_STOREFRONT_METRES` it is published only when both
+    records carry a street address and the two addresses differ, which is the
+    one piece of evidence available that they are two storefronts rather than
+    one. Otherwise it is ambiguous and dropped. Dropping it costs recall, which
+    is the thing this source was added to fix, so it is worth saying what the
+    alternative costs: a second pin for one cafe, twice in the result list, two
+    detail pages, and both of them half right.
+    """
+    by_name: dict[str, list[dict[str, Any]]] = {}
+    for spot in cafes:
+        by_name.setdefault(identities[spot["id"]].name, []).append(spot)
+    grid = point_grid(cafes)
+
+    merge = OsmMerge()
+    # Which OSM record enriched which cafe, so that a second claim on the same
+    # cafe can be recognized as the ambiguity it is rather than overwriting the
+    # first and depending on the order the file happened to be read in.
+    claimed: dict[str, str] = {}
+    added: list[dict[str, Any]] = []
+
+    for record in records:
+        if not isinstance(record, dict):
+            raise IngestError("An OSM cafe is not a JSON object.")
+
+        name = text(record.get("name"))
+        identifier = text(record.get("id"))
+        if name is None or identifier is None:
+            # osm.py drops both of these before writing the file, so reaching
+            # here means the file was hand-edited.
+            raise IngestError(f"An OSM cafe has no name or no id: {record!r}.")
+
+        try:
+            latitude = round(float(record["latitude"]), COORDINATE_DIGITS)
+            longitude = round(float(record["longitude"]), COORDINATE_DIGITS)
+        except (KeyError, TypeError, ValueError):
+            raise IngestError(f"OSM cafe {identifier!r} has unusable coordinates.") from None
+
+        name_key = match_key(name)
+        address_key = osm_address_key(record)
+
+        candidates = []
+        for spot in by_name.get(name_key, ()):
+            metres = haversine_metres(latitude, longitude, spot["latitude"], spot["longitude"])
+            agrees_on_address = bool(address_key) and identities[spot["id"]].address == address_key
+            if (agrees_on_address and metres <= OSM_ADDRESS_MATCH_RADIUS_METRES) or (
+                metres <= OSM_NAME_MATCH_RADIUS_METRES
+            ):
+                candidates.append(spot)
+
+        if len(candidates) > 1:
+            # The same name within walking distance twice. Two Starbucks either
+            # side of one street is the common case, and crediting one of them
+            # with the other's hours is a coin toss.
+            merge.ambiguous += 1
+            continue
+
+        if candidates:
+            spot = candidates[0]
+            if spot["id"] in claimed:
+                merge.ambiguous += 1
+                continue
+            claimed[spot["id"]] = identifier
+            spot.update(osm_attributes(record))
+            merge.enriched += 1
+            continue
+
+        # Unmatched, so this record is a candidate for publication and has to
+        # survive the same two placement tests every DOHMH cafe does. The
+        # Overpass bounding box is a rectangle and the city is not, so this is
+        # where New Jersey leaves: NYC_BOUNDS first because it is cheap, then
+        # the real neighborhood boundaries.
+        if not in_new_york_city(latitude, longitude):
+            merge.unplaceable += 1
+            continue
+        area = locate_nta(latitude, longitude, areas)
+        if area is None:
+            merge.unplaceable += 1
+            continue
+
+        # Before publishing it, make sure it is not a cafe the snapshot already
+        # has under another spelling.
+        neighbours = within(latitude, longitude, grid, OSM_SAME_STOREFRONT_METRES)
+        if any(
+            not (address_key and identities[spot["id"]].address != address_key)
+            for spot in neighbours
+        ):
+            merge.ambiguous += 1
+            continue
+
+        added.append(osm_spot(record, name, latitude, longitude, area))
+        merge.added += 1
+
+    return added, merge
 
 
 def in_new_york_city(latitude: float, longitude: float) -> bool:
@@ -1341,6 +1825,7 @@ def normalize(
     *,
     areas: list[NtaArea] | None = None,
     outdoor_dining: list[Any] | None = None,
+    osm: list[Any] | None = None,
 ) -> list[dict[str, Any]]:
     """The whole mapping, from raw upstream records to contract records.
 
@@ -1349,11 +1834,17 @@ def normalize(
     proximity test and the nearest campus -- are applied once, to everything,
     and cannot drift between sources.
 
-    ``areas`` and ``outdoor_dining`` are keyword-only and serve the cafes alone:
-    a caller mapping facilities needs neither, and most of the test suite is
-    exactly that caller. Passing cafes without ``areas`` is an error rather than
-    a default, because the fallback would be to drop every cafe for want of a
-    borough -- which looks like upstream having no coffee shops today.
+    ``areas``, ``outdoor_dining`` and ``osm`` are keyword-only and serve the
+    cafes alone: a caller mapping facilities needs none of them, and most of the
+    test suite is exactly that caller. Passing cafes without ``areas`` is an
+    error rather than a default, because the fallback would be to drop every
+    cafe for want of a borough -- which looks like upstream having no coffee
+    shops today.
+
+    ``osm`` is additive and may be empty. Without it the cafes are the DOHMH
+    establishments with three unrecorded fields, which is a smaller snapshot
+    rather than a wrong one; the OSM records can only add attributes to those
+    establishments and publish cafes DOHMH files under another cuisine.
     """
     if cafes and not areas:
         raise IngestError("Mapping cafes needs the NTA boundaries; pass areas=nta_areas(rows).")
@@ -1415,6 +1906,13 @@ def normalize(
                 # absence of a licence, which is what the field means
                 # everywhere.
                 "outdoor_seating": False,
+                # OpenStreetMap is read for cafes alone, so these three are
+                # unrecorded for every library and campus building. Null rather
+                # than false: nobody has said a branch has no indoor seating,
+                # which would be a strange thing to say about a library.
+                "indoor_seating": None,
+                "venue_wifi": None,
+                "opening_hours": None,
             }
         )
 
@@ -1430,6 +1928,10 @@ def normalize(
     closed = 0
     unusable = 0
     seated = 0
+    # Each DOHMH cafe's name and street address as the OSM join compares them,
+    # collected here because this is the last point the raw row is in hand.
+    identities: dict[str, CafeIdentity] = {}
+    dohmh_cafes: list[dict[str, Any]] = []
     for camis, record in inspected.items():
         if CLOSURE_ACTION.search(text(record.get("action")) or ""):
             # The health department closed it at its most recent inspection and
@@ -1443,7 +1945,13 @@ def normalize(
             continue
         if spot["outdoor_seating"]:
             seated += 1
-        spots.append(spot)
+        identities[spot["id"]] = CafeIdentity(
+            name=match_key(record.get("dba")),
+            address=match_key(
+                f"{text(record.get('building')) or ''} {text(record.get('street')) or ''}"
+            ),
+        )
+        dohmh_cafes.append(spot)
 
     if closed:
         warn(f"skipped {closed} establishment(s) closed at their most recent inspection")
@@ -1454,6 +1962,19 @@ def normalize(
         f"{seated} matched a sidewalk licence",
         file=sys.stderr,
     )
+
+    # Additive: this enriches the DOHMH cafes in place and returns the ones OSM
+    # alone knows about. Nothing above is dropped or changed by it.
+    osm_added, merge = merge_osm_cafes(dohmh_cafes, identities, osm or [], areas)
+    spots.extend(dohmh_cafes)
+    spots.extend(osm_added)
+    if osm:
+        print(
+            f"ingest: {len(osm)} OpenStreetMap cafes: {merge.enriched} enriched a DOHMH "
+            f"establishment, {merge.added} published as new spots, {merge.ambiguous} skipped as "
+            f"ambiguous, {merge.unplaceable} outside the city",
+            file=sys.stderr,
+        )
 
     points = hotspot_points(hotspots)
     for spot in spots:
@@ -1524,8 +2045,8 @@ def assign_nearby(spots: list[dict[str, Any]]) -> None:
     the surrounding streets are, and whether there is anywhere else to go if
     this place is full.
 
-    Bucketed onto a coarse grid first, so this is 2,422 lookups of a few
-    neighbours rather than 2,422 squared comparisons.
+    Bucketed onto a coarse grid first, so this is 3,772 lookups of a few
+    neighbours rather than 3,772 squared comparisons.
     """
     grid: dict[tuple[float, float], list[dict[str, Any]]] = {}
     for spot in spots:
@@ -1627,6 +2148,75 @@ def curated_spots(path: Path = CURATED_PATH) -> list[dict[str, Any]]:
     return spots
 
 
+def drop_curated_duplicates(
+    spots: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
+    """Drop open-data records that are really the curated building beside them.
+
+    FacDB registers "New York University Libraries" as an academic library at
+    Bobst's coordinates, 12 m from the curated ``nyu:bobst-library``. It is the
+    same building twice: a search for "bobst" returned both, because the search
+    vector includes the address and FacDB wrote the *building name* where a
+    street belongs. The curated record wins -- it has the real street address,
+    and the right university, where FacDB says "LIU-New York University
+    Campus", which is Long Island University.
+
+    Three conditions, and every one of them is load-bearing:
+
+    **Same category.** This is what protects the cafes. Nine non-curated
+    records sit within 60 m of a curated building and all nine are genuine
+    separate study spots -- Peet's Coffee @ NYU is 10 m from the Kimmel Center,
+    Blank Street Coffee is 26 m from Rogers Hall, The Uncommons 24 m from the
+    Global Center, Think Coffee 37 m from Courant. They are cafes *inside or
+    beside* the building. A proximity-only rule would delete all nine to fix
+    one duplicate.
+
+    **Within :data:`CURATED_DUPLICATE_METRES`.** Two records of one category
+    across the street from each other are two places.
+
+    **No house number in the address.** This is the condition that is easy to
+    leave out, and leaving it out costs a real record. *Two* academic libraries
+    sit within 50 m of Bobst, not one: the generic FacDB row above, and "NYU
+    Tamiment Library" at 17 m -- the Tamiment Library and Robert F. Wagner
+    Labor Archives, a named special collection on Bobst's tenth floor. It
+    publishes its own street address, "70 Washington Square South". It is a
+    library someone might search for by name and it is not a duplicate of
+    anything.
+
+    So the test is not "is it near the building" but "does it claim an address
+    of its own". A row that cannot say what street it is on, sitting on top of
+    a curated building of the same kind, has recorded that building. A row with
+    a street address is asserting a place, and is kept even when the street is
+    the curated record's own.
+
+    Returns the surviving spots and what was dropped, as ``(dropped, kept)``
+    name pairs, so the importer can report it rather than deleting records
+    quietly.
+    """
+    curated = [spot for spot in spots if spot["id"].startswith(f"{CURATED_PREFIX}:")]
+    if not curated:
+        return spots, []
+
+    dropped: dict[str, tuple[str, str]] = {}
+    for spot in spots:
+        if spot["id"].startswith(f"{CURATED_PREFIX}:"):
+            continue
+        if HOUSE_NUMBER.match(spot["address"] or ""):
+            continue
+        for building in curated:
+            if building["category"] != spot["category"]:
+                continue
+            metres = haversine_metres(
+                spot["latitude"], spot["longitude"], building["latitude"], building["longitude"]
+            )
+            if metres <= CURATED_DUPLICATE_METRES:
+                dropped[spot["id"]] = (spot["name"], building["name"])
+                break
+
+    kept = [spot for spot in spots if spot["id"] not in dropped]
+    return kept, list(dropped.values())
+
+
 def combine(
     facilities: list[dict[str, Any]],
     curated: list[dict[str, Any]],
@@ -1644,11 +2234,22 @@ def combine(
     open-data record that field is the nearest campus within 500 m; for these it
     is the institution whose building it is, which is the stronger claim the
     contract allows for a campus record.
+
+    A curated entry also wins against an open-data record that is the same
+    building under another name, which is a different thing from an identifier
+    collision and is what :func:`drop_curated_duplicates` resolves.
     """
     merged = {spot["id"]: spot for spot in facilities}
     merged.update({spot["id"]: spot for spot in curated})
 
     spots = sorted(merged.values(), key=lambda spot: spot["id"])
+
+    # Before the two derivations below rather than after: a record about to be
+    # dropped should not be counted as somebody else's neighbour.
+    spots, duplicates = drop_curated_duplicates(spots)
+    for name, building in duplicates:
+        warn(f"dropped {name!r}; it is the curated {building!r} under another name")
+
     # After merging rather than inside normalize(), because the curated records
     # never pass through it: this is the only point that sees every published
     # spot, and a hand-maintained station per building would go stale.
@@ -1722,6 +2323,7 @@ def main(argv: list[str] | None = None) -> int:
                 hotspots,
                 areas=nta_areas(neighborhoods),
                 outdoor_dining=outdoor_dining,
+                osm=osm_source(options.fixtures),
             ),
             curated_spots(),
             subway_stations(),
@@ -1739,6 +2341,18 @@ def main(argv: list[str] | None = None) -> int:
         f"wrote {len(spots)} spots ({summary}; {wifi} with free public wifi; "
         f"{outdoor} with outdoor seating) to {options.output}"
     )
+    # Reported three ways rather than as one total, because the whole reason
+    # these three fields exist is that "no" and "unrecorded" are different
+    # answers. A single "how many carry it" would hide that.
+    for field in OSM_FIELDS:
+        values = [spot[field] for spot in spots]
+        if field == "opening_hours":
+            print(f"  {field}: {sum(1 for value in values if value)} recorded")
+            continue
+        print(
+            f"  {field}: {values.count(True)} true, {values.count(False)} false, "
+            f"{values.count(None)} unrecorded"
+        )
     return 0
 
 

@@ -142,7 +142,7 @@ class StudySpot(models.Model):
     #: and the rest of this model is flat. ``subway_routes`` is space-joined the
     #: way the MTA publishes it and the way a sign reads.
     #:
-    #: All four are null together: 182 of 2,422 spots have no station that close,
+    #: All four are null together: 285 of 3,772 spots have no station that close,
     #: mostly on Staten Island where the railway is not the subway.
     subway_station = models.TextField(
         blank=True,
@@ -202,6 +202,60 @@ class StudySpot(models.Model):
             "cafe with the licence of whichever other business shares its building. "
             "Only cafes can carry it -- nothing licenses a library to put tables on "
             "the pavement."
+        ),
+    )
+
+    # The three OpenStreetMap fields, and the only three in this model that are
+    # null for *unrecorded* rather than for *not applicable*.
+    #
+    # Every other nullable column here is null because the record has no such
+    # thing: a cafe has no operator, a spot with no station within 1.2 km has no
+    # station. These three are null because nobody has written the answer down,
+    # and a consumer that reads null as false is making a claim the data does
+    # not support. `help_text` on each says so, because this model is where the
+    # API documentation comes from.
+    #
+    # Nullable booleans rather than three-valued text, because true and false
+    # are genuinely booleans and SQL already has a third state for "unknown".
+    # A `models.TextChoices` of "yes"/"no"/"unknown" would make every consumer
+    # compare strings to get at a boolean.
+
+    indoor_seating = models.BooleanField(
+        blank=True,
+        null=True,
+        help_text=(
+            "Whether OpenStreetMap records somewhere to sit inside. Null means "
+            "unrecorded, which is most spots: contributors have tagged it on 169 "
+            "cafes in the city. False is a contributor saying there is nowhere to sit "
+            "inside, which is a real answer and not the same as null."
+        ),
+    )
+
+    venue_wifi = models.BooleanField(
+        blank=True,
+        null=True,
+        help_text=(
+            "Whether OpenStreetMap records Wi-Fi this venue provides. A different "
+            "claim from free_public_wifi, which is a hotspot the *city* publishes "
+            "within 25 m of the point: a cafe can have its own Wi-Fi and no city "
+            "hotspot anywhere near it, and a library can have the hotspot. Null means "
+            "unrecorded. False is a contributor who went and looked and found none, "
+            "which is a trustworthy negative -- unlike a false free_public_wifi, which "
+            "only ever meant that no published hotspot is nearby."
+        ),
+    )
+
+    opening_hours = models.TextField(
+        blank=True,
+        null=True,
+        help_text=(
+            "When the place is open, in OpenStreetMap's own syntax, as in "
+            "'Mo-Fr 07:00-19:00; Sa-Su 08:00-18:00'. Stored and served as written "
+            "rather than parsed: deciding whether somewhere is open now needs a "
+            "timezone and the public-holiday calendar the syntax can refer to, and "
+            "telling someone a closed cafe is open is worse than telling them "
+            "nothing. Null for every spot no contributor has recorded hours for, "
+            "which is every library -- no city source publishes a schedule."
         ),
     )
 
@@ -286,6 +340,17 @@ class StudySpot(models.Model):
             models.Index(fields=["free_public_wifi"], name="spots_wifi_idx"),
             models.Index(fields=["no_purchase_needed"], name="spots_cost_idx"),
             models.Index(fields=["nearby_spots"], name="spots_nearby_idx"),
+            # Indexed because it has a query parameter behind it, which is the
+            # rule the two indexes above follow. `venue_wifi` and
+            # `opening_hours` have no filter and so no index: an index on a
+            # column nothing queries is a write cost for nothing.
+            #
+            # The column is nullable and the index covers the nulls too, which
+            # is wasted space on 3,647 of 3,772 rows -- a partial index would be
+            # tighter. Left plain because Django would then need the same
+            # condition spelled identically here and in the migration, and the
+            # table is small enough that the difference is theoretical.
+            models.Index(fields=["indoor_seating"], name="spots_indoor_idx"),
             # Trigram indexes for the ranked search in spots/search.py. A GIN
             # index with gin_trgm_ops is what turns a similarity comparison
             # from a scan of every row into an index lookup, and it serves the

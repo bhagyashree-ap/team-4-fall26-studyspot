@@ -234,6 +234,9 @@ class TestOneSpot:
             "subway_step_free",
             "nearby_spots",
             "outdoor_seating",
+            "indoor_seating",
+            "venue_wifi",
+            "opening_hours",
         }
 
     def test_an_unknown_identifier_is_a_404(self) -> None:

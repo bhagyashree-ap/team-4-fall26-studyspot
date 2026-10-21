@@ -140,13 +140,20 @@
 					<!-- Proximity, never affiliation: see the contract. -->
 					<p class="campus">Near {spot.university}</p>
 				{/if}
-				{#if spot.no_purchase_needed || spot.free_public_wifi}
+				{#if spot.no_purchase_needed || spot.free_public_wifi || spot.indoor_seating === true}
 					<!--
-						Both are shown only when true, and for the same reason: the
-						absence of one is not evidence of its opposite. A false
+						Every badge is shown only when true, and for the same reason:
+						the absence of one is not evidence of its opposite. A false
 						free_public_wifi means no hotspot the city publishes sits
 						within 25 m, which is not the same as no Wi-Fi, and saying
 						"no Wi-Fi" would assert more than the data supports.
+
+						indoor_seating is three-state, so the test is `=== true`
+						rather than a truthiness check — which would read the same
+						for a recorded "no" and for an unrecorded null, and those
+						are different answers. The detail page is where all three
+						states are spelled out; a card has room for the good news
+						only.
 					-->
 					<p class="badges">
 						{#if spot.no_purchase_needed}
@@ -171,6 +178,22 @@
 									<circle cx="12" cy="19.5" r="1" />
 								</svg>
 								Free public Wi-Fi
+							</span>
+						{/if}
+						{#if spot.indoor_seating === true}
+							<!--
+								Somewhere to sit inside, which for a café in February is
+								the question. "Indoor seating" and not "seating": the
+								data says inside, and a pavement table is a different
+								field.
+							-->
+							<span class="badge">
+								<svg viewBox="0 0 24 24" aria-hidden="true">
+									<path d="M7 20v-5.5h10V20" />
+									<path d="M5.5 14.5h13" />
+									<path d="M8 11V5.5a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 16 5.5V11" />
+								</svg>
+								Indoor seating
 							</span>
 						{/if}
 					</p>

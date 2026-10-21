@@ -23,7 +23,11 @@ const FACETS: Facets = {
 	categories: [{ value: 'academic_library', count: 8 }],
 	universities: [{ value: 'New York University', count: 10 }],
 	free_public_wifi: 34,
-	no_purchase_needed: 56
+	no_purchase_needed: 56,
+	// Deliberately much smaller than the other two: it counts the spots
+	// somebody has *recorded* indoor seating for, not the ones not known to
+	// lack it.
+	indoor_seating: 3
 };
 
 function spot(id: string, name: string): StudySpot {
@@ -45,7 +49,10 @@ function spot(id: string, name: string): StudySpot {
 		subway_metres: 409,
 		subway_step_free: 'full',
 		nearby_spots: 41,
-		outdoor_seating: false
+		outdoor_seating: false,
+		indoor_seating: null,
+		venue_wifi: null,
+		opening_hours: null
 	};
 }
 
@@ -236,12 +243,12 @@ describe('the place card', () => {
 	});
 });
 
-describe('the filter counts', () => {
-	/** Every facets request, in order. */
-	function facetRequests() {
-		return calls.filter((call) => call.path === '/api/spots/facets');
-	}
+/** Every facets request, in order. */
+function facetRequests() {
+	return calls.filter((call) => call.path === '/api/spots/facets');
+}
 
+describe('the filter counts', () => {
 	it('are fetched for the whole snapshot on arrival', async () => {
 		render(Home);
 
@@ -288,6 +295,64 @@ describe('the filter counts', () => {
 		render(Home);
 
 		await expect.element(page.getByText('(34)')).toBeInTheDocument();
+	});
+
+	it('put the indoor-seating count on its checkbox, small as it is', async () => {
+		// 3 against 34 and 56 in this fixture, and around 112 of 3,772 in the
+		// real snapshot. The count is doing more work on this checkbox than on
+		// the other two: it is what stops a filter that hides almost everything
+		// from looking broken.
+		render(Home);
+
+		await expect.element(page.getByText('(3)')).toBeInTheDocument();
+	});
+});
+
+describe('the indoor-seating filter', () => {
+	/**
+	 * Toggle the checkbox by clicking the element itself.
+	 *
+	 * `locator.click()` times out here with "element is outside of the viewport",
+	 * while reporting the element visible, enabled and stable — because it is.
+	 * The filters are one column and each control is at least 60px tall, so the
+	 * sixth falls below the fold of the harness's fixed-size iframe, and neither
+	 * scrolling it into view nor enlarging the viewport moves that boundary. The
+	 * control is fine: it renders correctly and a person scrolls to it.
+	 *
+	 * A native `.click()` dispatches the same trusted-shaped event the component
+	 * listens for, so what is under test — that ticking it sends
+	 * `indoor_seating=true` and unticking it sends nothing — is exercised
+	 * unchanged.
+	 */
+	function toggle(): void {
+		(page.getByLabelText(/Indoor seating/).element() as HTMLInputElement).click();
+	}
+
+	it('asks the API for the spots with a recorded yes', async () => {
+		render(Home);
+
+		toggle();
+		await expect.element(page.getByText('Allerton Library')).toBeInTheDocument();
+		await expect.poll(() => lastRequest().parameters.get('indoor_seating')).toBe('true');
+	});
+
+	it('never sends false, which is a filter rather than the absence of one', async () => {
+		// The mistake worth guarding. `?indoor_seating=false` selects the spots
+		// somebody recorded as having *nowhere* to sit inside -- 13 of them
+		// citywide -- so an untick that sent it would narrow the results
+		// instead of widening them. The checkbox drops the key instead.
+		//
+		// Unticking the last filter takes the page back to idle without
+		// listing, which is how it loads, so the facets request is what shows
+		// the parameter is gone: those are refetched on every filter change.
+		render(Home);
+
+		toggle();
+		await expect.poll(() => lastRequest().parameters.get('indoor_seating')).toBe('true');
+
+		toggle();
+		await expect.poll(() => facetRequests().at(-1)?.parameters.has('indoor_seating')).toBe(false);
+		expect(calls.some((call) => call.parameters.get('indoor_seating') === 'false')).toBe(false);
 	});
 });
 

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import type { StudySpot } from '$lib/contract';
+	import NearbyMap from '$lib/NearbyMap.svelte';
 	import { showsCampus } from '$lib/campus';
 	import { mapsUrl } from '$lib/maps';
 	import { orderByTrunk, routeColour, routeTextColour, STEP_FREE, walkMinutes } from '$lib/subway';
@@ -133,17 +134,77 @@
 					{/if}
 				</dd>
 
+				{#if spot.opening_hours}
+					<dt>Hours</dt>
+					<!--
+						OpenStreetMap's own syntax, shown as written. Not turned into
+						"open now": that needs a timezone and the public-holiday
+						calendar the syntax can refer to, and sending someone to a
+						closed café is worse than making them read a line.
+
+						No row at all when it is null, unlike the two fields below.
+						There is no recorded "closed" to distinguish an absence from —
+						hours are either written down or they are not.
+					-->
+					<dd>
+						<span class="hours">{spot.opening_hours}</span>
+						<span class="note">— as recorded by OpenStreetMap contributors</span>
+					</dd>
+				{/if}
+
+				{#if spot.indoor_seating !== null}
+					<!--
+						Shown for a recorded yes *and* a recorded no, and omitted only
+						when nobody has said. A recorded "no" is somebody who went and
+						looked, which is worth more than silence and must not read like
+						it: `!== null` rather than a truthiness test, which would put
+						the two in the same branch.
+					-->
+					<dt>Indoor seating</dt>
+					<dd>
+						{#if spot.indoor_seating}
+							Recorded as having somewhere to sit inside.
+						{:else}
+							Recorded as having nowhere to sit inside.
+							<span class="note">A counter or a window, rather than tables.</span>
+						{/if}
+					</dd>
+				{/if}
+
 				<dt>Wi-Fi</dt>
+				<!--
+					Two different claims, kept apart on purpose and never merged into
+					one line. `venue_wifi` is the Wi-Fi this place provides, recorded
+					by somebody who was there. `free_public_wifi` is a hotspot *the
+					city* publishes within 25 m of the point, which is usually a
+					library's own and occasionally a LinkNYC kiosk on the pavement. A
+					café can have the first and not the second, and a library the
+					reverse, so one sentence covering both would be wrong about one of
+					them.
+
+					Their falses are also worth different amounts, which is why they
+					are worded differently. A false `venue_wifi` is a contributor who
+					looked and found none. A false `free_public_wifi` only ever meant
+					that nothing the city publishes is nearby.
+				-->
 				<dd>
+					{#if spot.venue_wifi === true}
+						Wi-Fi for customers is recorded here.
+					{:else if spot.venue_wifi === false}
+						A contributor recorded no Wi-Fi for customers.
+					{:else}
+						Nobody has recorded whether this place has its own Wi-Fi.
+					{/if}
+					<br />
 					{#if spot.free_public_wifi}
-						A free public hotspot the city publishes sits within 25 m.
+						Separately, a free public hotspot the city publishes sits within 25 m.
 					{:else}
 						<!--
 							The careful wording the whole contract turns on: false means
 							unrecorded, not absent.
 						-->
-						No free public hotspot is recorded within 25 m.
-						<span class="note">That is not the same as having no Wi-Fi.</span>
+						No free public hotspot the city publishes is recorded within 25 m.
+						<span class="note">That is a different question from the line above.</span>
 					{/if}
 				</dd>
 			</dl>
@@ -162,6 +223,13 @@
 		{#if data.nearby.length > 0}
 			<section aria-labelledby="nearby-title">
 				<h2 id="nearby-title">Also within a short walk</h2>
+
+				<!--
+					The map is an enhancement over the list, never a replacement.
+					It loads only when scrolled to, and if it fails to load the
+					list below still answers the question.
+				-->
+				<NearbyMap {spot} nearby={data.nearby} />
 
 				<ul>
 					{#each data.nearby.slice(0, SHOWN) as entry (entry.spot.id)}
@@ -330,6 +398,19 @@
 	.note {
 		color: var(--color-muted);
 		font-size: 13px;
+	}
+
+	/*
+		Set in a monospaced face because it is a notation rather than a sentence:
+		"Mo-Fr 07:00-19:00; Sa-Su 08:00-18:00" is OpenStreetMap's syntax shown as
+		written, and typesetting it as prose invites reading it as prose. The
+		tabular figures line the times up under each other when a café has a
+		different schedule every day.
+	*/
+	.hours {
+		font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+		font-size: 14px;
+		font-variant-numeric: tabular-nums;
 	}
 
 	.directions {

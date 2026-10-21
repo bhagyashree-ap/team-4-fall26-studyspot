@@ -1,0 +1,86 @@
+[
+  {
+    "id": "n90000001",
+    "name": "Mee Sum Cafe",
+    "latitude": 40.7149,
+    "longitude": -73.9981,
+    "house_number": "26",
+    "street": "Pell Street",
+    "postcode": "10013",
+    "indoor_seating": true,
+    "venue_wifi": true,
+    "opening_hours": "Mo-Su 08:00-21:00"
+  },
+  {
+    "id": "n90000002",
+    "name": "Joe Coffee Company",
+    "latitude": 40.6991,
+    "longitude": -73.9939,
+    "house_number": null,
+    "street": null,
+    "postcode": null,
+    "indoor_seating": false,
+    "venue_wifi": false,
+    "opening_hours": null
+  },
+  {
+    "id": "n90000003",
+    "name": "Caffe Reggio",
+    "latitude": 40.730322,
+    "longitude": -74.0003624,
+    "house_number": "119",
+    "street": "MacDougal Street",
+    "postcode": "10012",
+    "indoor_seating": true,
+    "venue_wifi": null,
+    "opening_hours": "Mo-Su 09:00-01:00"
+  },
+  {
+    "id": "n90000004",
+    "name": "Starbucks",
+    "latitude": 40.7281,
+    "longitude": -74.0001,
+    "house_number": null,
+    "street": null,
+    "postcode": null,
+    "indoor_seating": true,
+    "venue_wifi": true,
+    "opening_hours": "Mo-Su 06:00-20:00"
+  },
+  {
+    "id": "n90000005",
+    "name": "Gregory's Coffee",
+    "latitude": 40.7279,
+    "longitude": -74.0005,
+    "house_number": "171",
+    "street": "Thompson Street",
+    "postcode": "10012",
+    "indoor_seating": null,
+    "venue_wifi": true,
+    "opening_hours": null
+  },
+  {
+    "id": "w90000006",
+    "name": "Savanna Café",
+    "latitude": 40.76,
+    "longitude": -74.28,
+    "house_number": null,
+    "street": "Northfield Avenue",
+    "postcode": null,
+    "indoor_seating": true,
+    "venue_wifi": null,
+    "opening_hours": null
+  },
+  {
+    "id": "n90000007",
+    "name": "Upstate Roasters",
+    "latitude": 41.5,
+    "longitude": -74.0,
+    "house_number": "1",
+    "street": "Main Street",
+    "postcode": null,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
+  }
+]

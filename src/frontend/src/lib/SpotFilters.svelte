@@ -37,35 +37,48 @@
 </script>
 
 <div class="filters" role="group" aria-label="Filter results">
-	<label>
-		<span>Borough</span>
-		<select
-			value={filters.borough ?? ''}
-			onchange={(event) => set({ borough: event.currentTarget.value })}
-		>
-			<option value="">Any</option>
-			{#each facets?.boroughs ?? [] as facet (facet.value)}
-				<option value={facet.value}>{facet.value} ({facet.count})</option>
-			{/each}
-		</select>
-	</label>
+	<!--
+		The row wrappers and the `.switch` span below are not decoration: the
+		stylesheet is written around them. `.toggle input` is deliberately
+		hidden -- 1x1px at opacity 0 -- so that `.switch` can be the visible
+		control, and without it the three toggles rendered as plain text with
+		no box, no checked state and no focus ring. They still worked, which is
+		why it was easy to miss.
 
-	<label>
-		<span>Type</span>
-		<select
-			value={filters.category ?? ''}
-			onchange={(event) => set({ category: event.currentTarget.value })}
-		>
-			<option value="">Any</option>
-			{#each facets?.categories ?? [] as facet (facet.value)}
-				<option value={facet.value}>{readable(facet.value)} ({facet.count})</option>
-			{/each}
-		</select>
-	</label>
+		They were lost in a merge rather than never written: PR #34 had all of
+		this, and its merge commit took one side's markup and the other side's
+		stylesheet. Restored from `945b94d`.
+	-->
+	<div class="field-row">
+		<label class="field">
+			<span>Borough</span>
+			<select
+				value={filters.borough ?? ''}
+				onchange={(event) => set({ borough: event.currentTarget.value })}
+			>
+				<option value="">Any</option>
+				{#each facets?.boroughs ?? [] as facet (facet.value)}
+					<option value={facet.value}>{facet.value} ({facet.count})</option>
+				{/each}
+			</select>
+		</label>
 
-	<label>
-		<span>Campus</span>
-		<!--
+		<label class="field">
+			<span>Type</span>
+			<select
+				value={filters.category ?? ''}
+				onchange={(event) => set({ category: event.currentTarget.value })}
+			>
+				<option value="">Any</option>
+				{#each facets?.categories ?? [] as facet (facet.value)}
+					<option value={facet.value}>{readable(facet.value)} ({facet.count})</option>
+				{/each}
+			</select>
+		</label>
+
+		<label class="field">
+			<span>Campus</span>
+			<!--
 			A list rather than a select: there are 126 campuses, which is a
 			scroll in a dropdown and a type-ahead in a datalist.
 
@@ -75,28 +88,30 @@
 			value narrows now rather than returning nothing, so typing is worth
 			following.
 		-->
-		<input
-			list="campus-options"
-			value={filters.university ?? ''}
-			placeholder="Any"
-			autocomplete="off"
-			oninput={(event) => set({ university: event.currentTarget.value }, true)}
-			onchange={(event) => set({ university: event.currentTarget.value })}
-		/>
-		<datalist id="campus-options">
-			{#each facets?.universities ?? [] as facet (facet.value)}
-				<option value={facet.value}>{facet.count}</option>
-			{/each}
-		</datalist>
-	</label>
+			<input
+				list="campus-options"
+				value={filters.university ?? ''}
+				placeholder="Any"
+				autocomplete="off"
+				oninput={(event) => set({ university: event.currentTarget.value }, true)}
+				onchange={(event) => set({ university: event.currentTarget.value })}
+			/>
+			<datalist id="campus-options">
+				{#each facets?.universities ?? [] as facet (facet.value)}
+					<option value={facet.value}>{facet.count}</option>
+				{/each}
+			</datalist>
+		</label>
+	</div>
 
-	<label class="toggle">
-		<input
-			type="checkbox"
-			checked={filters.free_public_wifi === true}
-			onchange={(event) => set({ free_public_wifi: event.currentTarget.checked || undefined })}
-		/>
-		<!--
+	<div class="toggle-row">
+		<label class="toggle">
+			<input
+				type="checkbox"
+				checked={filters.free_public_wifi === true}
+				onchange={(event) => set({ free_public_wifi: event.currentTarget.checked || undefined })}
+			/>
+			<!--
 			"Free public Wi-Fi" rather than "has Wi-Fi": the data says a hotspot
 			the city publishes is within 25 m, which a campus building's
 			credentialled network is not.
@@ -104,32 +119,61 @@
 			The count is how many of the currently matching spots have it, so it
 			answers "is this worth ticking" before you tick it.
 		-->
-		<span>
-			Free public Wi-Fi
-			{#if facets}
-				<span class="count">({facets.free_public_wifi})</span>
-			{/if}
-		</span>
-	</label>
+			<span>
+				Free public Wi-Fi
+				{#if facets}
+					<span class="count">({facets.free_public_wifi})</span>
+				{/if}
+			</span>
+			<span class="switch" aria-hidden="true"></span>
+		</label>
 
-	<label class="toggle">
-		<input
-			type="checkbox"
-			checked={filters.no_purchase_needed === true}
-			onchange={(event) => set({ no_purchase_needed: event.currentTarget.checked || undefined })}
-		/>
-		<!--
+		<label class="toggle">
+			<input
+				type="checkbox"
+				checked={filters.no_purchase_needed === true}
+				onchange={(event) => set({ no_purchase_needed: event.currentTarget.checked || undefined })}
+			/>
+			<!--
 			The question a student actually asks, and not any one type: it is
 			true of every library and of the campus buildings, false only of
 			cafés. About money rather than entry.
 		-->
-		<span>
-			No purchase needed
-			{#if facets}
-				<span class="count">({facets.no_purchase_needed})</span>
-			{/if}
-		</span>
-	</label>
+			<span>
+				No purchase needed
+				{#if facets}
+					<span class="count">({facets.no_purchase_needed})</span>
+				{/if}
+			</span>
+			<span class="switch" aria-hidden="true"></span>
+		</label>
+
+		<label class="toggle">
+			<input
+				type="checkbox"
+				checked={filters.indoor_seating === true}
+				onchange={(event) => set({ indoor_seating: event.currentTarget.checked || undefined })}
+			/>
+			<!--
+			"Indoor seating", matching the badge on the result card, rather than
+			"Indoor seating recorded".
+
+			The longer label was trying to carry a real caveat: unlike the two
+			above it, this field is unrecorded for most spots, so ticking it
+			hides the places nobody has mapped as well as the places with
+			nowhere to sit. The count does that job instead, and does it
+			better -- (112) against (567) and (263) says plainly that this one
+			narrows hard, and it says it before you tick.
+		-->
+			<span>
+				Indoor seating
+				{#if facets}
+					<span class="count">({facets.indoor_seating})</span>
+				{/if}
+			</span>
+			<span class="switch" aria-hidden="true"></span>
+		</label>
+	</div>
 
 	{#if active > 0}
 		<button type="button" onclick={() => onChange({})}>
@@ -161,8 +205,13 @@
 		grid-template-columns: repeat(3, minmax(0, 1fr));
 	}
 
+	/*
+		Three, matching .field-row above it, because there are three toggles.
+		It was written as two when there were two, and a third in a two-column
+		grid wraps onto a row of its own with an empty cell beside it.
+	*/
 	.toggle-row {
-		grid-template-columns: repeat(2, minmax(0, 1fr));
+		grid-template-columns: repeat(3, minmax(0, 1fr));
 	}
 
 	label {
@@ -308,8 +357,14 @@
 		}
 	}
 
+	/*
+		.toggle-row joins .field-row here for the same reason it now has three
+		columns: at this width three of them share about 250px each, and
+		"Indoor seating (112)" and its two neighbours do not fit in that.
+	*/
 	@media (min-width: 561px) and (max-width: 820px) {
-		.field-row {
+		.field-row,
+		.toggle-row {
 			grid-template-columns: 1fr;
 		}
 	}

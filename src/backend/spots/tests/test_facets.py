@@ -117,6 +117,7 @@ class TestEnvelope:
             "universities",
             "free_public_wifi",
             "no_purchase_needed",
+            "indoor_seating",
         }
 
     def test_a_value_list_carries_a_value_and_a_count(

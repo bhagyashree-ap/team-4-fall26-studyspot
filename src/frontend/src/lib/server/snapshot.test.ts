@@ -19,7 +19,7 @@ describe('reading the snapshot', () => {
 	});
 
 	it('reads it once however many times it is asked', () => {
-		// Prerendering 1,916 pages would otherwise parse it 1,916 times.
+		// Prerendering 3,772 pages would otherwise parse it 3,772 times.
 		expect(allSpots()).toBe(allSpots());
 	});
 

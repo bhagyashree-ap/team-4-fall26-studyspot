@@ -21,9 +21,19 @@ cases the live data cannot supply -- an establishment whose ``boro`` is ``"0"``
 boundary geometry for only the five the fixture cafes fall in. The real response
 is 4.5 MB of coastline and none of the rest of it is exercised.
 
+``fixtures/osm_cafes.json`` is seven records in the shape ``osm.py`` writes, one
+per branch of the join: one that matches a fixture establishment on name and
+address, one that matches on name and proximity with no address at all, one that
+matches nothing and is published (Caffe Reggio, the case the whole source exists
+for), one that matches nothing but is 31 m from a fixture cafe at a *different*
+street address and is published on that evidence, one 54 m from a fixture cafe
+with no address to tell them apart and so dropped as ambiguous, and two outside
+the city -- one in New Jersey inside the Overpass bounding box, one outside
+``NYC_BOUNDS`` altogether.
+
 What matters here is that the snapshot the importer writes is one the loader
-accepts and the API can serve: thirteen fields, five boroughs, nulls rather than
-blanks, and identifiers that do not move when upstream edits a name.
+accepts and the API can serve: twenty-one fields, five boroughs, nulls rather
+than blanks, and identifiers that do not move when upstream edits a name.
 """
 
 from __future__ import annotations
@@ -67,6 +77,12 @@ PUBLISHED_EXAMPLE = {
     # Nothing licenses a library to put tables on the pavement, so no facility
     # can match the seating join.
     "outdoor_seating": False,
+    # OpenStreetMap is read for cafes alone, so all three are unrecorded here.
+    # Null and not false: nobody has said this branch has no indoor seating,
+    # which would be a strange thing to say about a library.
+    "indoor_seating": None,
+    "venue_wifi": None,
+    "opening_hours": None,
 }
 
 #: The published vocabulary. `university_building` is a campus building a
@@ -109,6 +125,11 @@ def outdoor_dining() -> list[dict[str, Any]]:
 
 
 @pytest.fixture(scope="module")
+def osm() -> list[dict[str, Any]]:
+    return ingest.fixture_rows(FIXTURES, "osm_cafes")
+
+
+@pytest.fixture(scope="module")
 def areas() -> list[ingest.NtaArea]:
     """The boundary polygons, which is how a cafe gets placed.
 
@@ -136,10 +157,35 @@ def cafe_spots(
     areas: list[ingest.NtaArea],
     outdoor_dining: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    """The cafes with no OpenStreetMap read at all.
+
+    Which is a state the importer supports rather than a contrivance: the OSM
+    list is a committed file, and :func:`ingest.osm_cafes` warns and carries on
+    without it. These records are what the snapshot held before the source was
+    added, so the tests that predate it keep testing what they tested.
+    """
     return [
         spot
         for spot in ingest.normalize(
             [], cafes, names, [], areas=areas, outdoor_dining=outdoor_dining
+        )
+        if spot["category"] == ingest.CAFE_CATEGORY
+    ]
+
+
+@pytest.fixture(scope="module")
+def merged_cafe_spots(
+    cafes: list[dict[str, Any]],
+    names: dict[str, str],
+    areas: list[ingest.NtaArea],
+    outdoor_dining: list[dict[str, Any]],
+    osm: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """The cafes with OpenStreetMap merged over them, which is what ships."""
+    return [
+        spot
+        for spot in ingest.normalize(
+            [], cafes, names, [], areas=areas, outdoor_dining=outdoor_dining, osm=osm
         )
         if spot["category"] == ingest.CAFE_CATEGORY
     ]
@@ -152,6 +198,11 @@ def upstream(facilities: list[dict[str, Any]], facname: str) -> dict[str, Any]:
 
 def published(spots: list[dict[str, Any]], name: str) -> dict[str, Any]:
     return next(spot for spot in spots if spot["name"] == name)
+
+
+def osm_key(address: dict[str, Any]) -> str:
+    """The join key for an OSM cafe carrying only the address fields given."""
+    return ingest.osm_address_key({"id": "n1", "name": "Test Cafe", **address})
 
 
 class TestPublishedExample:
@@ -453,9 +504,12 @@ class TestCommandLine:
         # campuses, which anchor the proximity label without being spots -- and
         # five cafes from eleven inspection rows: eight establishments, less one
         # closed at its most recent inspection, one with no geocode and one
-        # geocoded into open water. Plus the curated buildings, which are read
-        # from the repository rather than from the network.
-        assert len(written) == 9 + 5 + len(ingest.curated_spots())
+        # geocoded into open water. Plus two cafes only OpenStreetMap knows
+        # about, of the seven records in that fixture: two enriched a DOHMH
+        # establishment instead of being published, one was ambiguous and two
+        # are outside the city. Plus the curated buildings, which are read from
+        # the repository rather than from the network.
+        assert len(written) == 9 + 5 + 2 + len(ingest.curated_spots())
 
     def test_a_missing_fixture_directory_is_reported_not_raised(self, tmp_path: Path) -> None:
         assert ingest.main(["--fixtures", str(tmp_path / "absent")]) == 1
@@ -571,6 +625,9 @@ class TestCuratedBuildings:
                         "subway_step_free": None,
                         "nearby_spots": 0,
                         "outdoor_seating": False,
+                        "indoor_seating": None,
+                        "venue_wifi": None,
+                        "opening_hours": None,
                     }.items()
                 )
             )
@@ -1125,3 +1182,697 @@ class TestNearestSubway:
                 )
             ]
             assert len(set(present)) == 1, spot["id"]
+
+
+class TestOpenStreetMapIsAdditive:
+    """The OSM merge may only add; it may never change what DOHMH established.
+
+    This is the property the whole change turns on. The cafe source has already
+    been swapped once and it cost real records, so the join is written to add
+    attributes and records and to be incapable of anything else.
+    """
+
+    def test_no_dohmh_cafe_is_lost(
+        self,
+        cafe_spots: list[dict[str, Any]],
+        merged_cafe_spots: list[dict[str, Any]],
+    ) -> None:
+        before = {spot["id"] for spot in cafe_spots}
+        after = {spot["id"] for spot in merged_cafe_spots}
+
+        assert before <= after
+
+    def test_nothing_but_the_three_osm_fields_changes_on_a_dohmh_cafe(
+        self,
+        cafe_spots: list[dict[str, Any]],
+        merged_cafe_spots: list[dict[str, Any]],
+    ) -> None:
+        merged = {spot["id"]: spot for spot in merged_cafe_spots}
+
+        for before in cafe_spots:
+            after = merged[before["id"]]
+            for field in ingest.CONTRACT_FIELDS:
+                if field in ingest.OSM_FIELDS:
+                    continue
+                # nearby_spots is assigned by combine() and these records have
+                # not been through it, so it is 0 on both sides here.
+                assert after[field] == before[field], f"{before['id']}.{field}"
+
+    def test_a_cafe_dohmh_files_under_another_cuisine_is_published(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        """The regression this source was added to fix.
+
+        Caffe Reggio has been on MacDougal Street since 1927. DOHMH records its
+        cuisine as Italian, so filtering on Coffee/Tea loses it, and it went
+        missing from the live site when the category moved onto DOHMH.
+        """
+        reggio = published(merged_cafe_spots, "Caffe Reggio")
+
+        assert reggio["id"] == "osm:n90000003"
+        assert reggio["category"] == ingest.CAFE_CATEGORY
+        assert reggio["address"] == "119 MacDougal Street, NY 10012"
+        assert reggio["neighborhood"] == "Greenwich Village"
+        assert reggio["borough"] == "Manhattan"
+
+    def test_an_added_cafe_matches_the_contract_exactly(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        reggio = published(merged_cafe_spots, "Caffe Reggio")
+
+        assert tuple(reggio) == ingest.CONTRACT_FIELDS
+
+    def test_an_added_cafe_is_not_free_and_names_no_campus(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        # A cafe is where you buy something, and a cafe is a third place in its
+        # own right rather than somewhere reached through a campus. The same two
+        # rules the DOHMH cafes follow.
+        reggio = published(merged_cafe_spots, "Caffe Reggio")
+
+        assert reggio["no_purchase_needed"] is False
+        assert reggio["university"] is None
+
+    def test_an_added_cafe_matches_no_sidewalk_licence(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        # The licence join runs on DOHMH establishments and this is not one, so
+        # false here means what it means everywhere: no licence matched. OSM's
+        # own outdoor_seating tag is deliberately not read into it.
+        reggio = published(merged_cafe_spots, "Caffe Reggio")
+
+        assert reggio["outdoor_seating"] is False
+
+
+class TestOpenStreetMapMatching:
+    """Which OSM records join, which are published, and which are refused.
+
+    A wrong join silently attaches one venue's attributes to another, which has
+    already happened on this project once. So a match needs the name *and* the
+    location, and the cases below are the ones that decide it.
+    """
+
+    def test_a_name_and_address_match_enriches_the_establishment(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        # OSM's "Mee Sum Cafe" at 26 Pell Street is the fixture establishment of
+        # that name at that address.
+        mee_sum = published(merged_cafe_spots, "Mee Sum Cafe")
+
+        assert mee_sum["id"].startswith(f"{ingest.CAFE_PREFIX}:")
+        assert mee_sum["indoor_seating"] is True
+        assert mee_sum["venue_wifi"] is True
+        assert mee_sum["opening_hours"] == "Mo-Su 08:00-21:00"
+
+    def test_a_name_match_without_an_address_still_enriches_when_it_is_close(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        # 60 m away and no addr:street at all, which is 862 of the 2,978 records.
+        # The name and the proximity together are the match.
+        joe = published(merged_cafe_spots, "Joe Coffee Company")
+
+        assert joe["id"].startswith(f"{ingest.CAFE_PREFIX}:")
+        assert joe["venue_wifi"] is False
+        assert joe["indoor_seating"] is False
+
+    def test_a_recorded_no_survives_as_false_rather_than_becoming_unrecorded(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        """The point of the whole exercise.
+
+        ``internet_access = no`` is somebody who went and looked. Rounding it to
+        null would throw away the only trustworthy negative in the snapshot --
+        ``free_public_wifi = false`` means no *city* hotspot within 25 m, which
+        is a different and much weaker statement.
+        """
+        joe = published(merged_cafe_spots, "Joe Coffee Company")
+
+        assert joe["venue_wifi"] is False
+        assert joe["venue_wifi"] is not None
+
+    def test_an_unmatched_cafe_at_a_different_address_nearby_is_published(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        """31 m from "Leon's Bagels" at 169 Thompson Street, and at 171.
+
+        Proximity alone cannot tell a differently-spelled duplicate from the
+        shop next door -- in the live data about half of each -- so the street
+        address is what decides it. Two addresses are two storefronts.
+        """
+        gregorys = published(merged_cafe_spots, "Gregory's Coffee")
+
+        assert gregorys["id"] == "osm:n90000005"
+        assert gregorys["address"] == "171 Thompson Street, NY 10012"
+
+    def test_an_unmatched_cafe_with_no_address_nearby_is_dropped(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        """54 m from "Leon's Bagels" and carrying no address of its own.
+
+        It might be that cafe under another name and it might be the one next
+        door, and nothing here says which. Publishing it risks a second pin for
+        one place; joining it risks crediting Leon's with somebody else's hours.
+        """
+        assert not [spot for spot in merged_cafe_spots if spot["name"] == "Starbucks"]
+
+    def test_a_cafe_in_new_jersey_inside_the_bounding_box_is_dropped(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        # The Overpass bounding box is a rectangle and the city is not: it
+        # reaches into Essex County, and the cafe at Turtle Back Zoo in West
+        # Orange is inside it and inside NYC_BOUNDS. The neighborhood polygons
+        # are what actually keeps New Jersey out, as they do for DOHMH.
+        assert not [spot for spot in merged_cafe_spots if spot["name"] == "Savanna Café"]
+
+    def test_a_cafe_outside_the_city_bounds_is_dropped(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        assert not [spot for spot in merged_cafe_spots if spot["name"] == "Upstate Roasters"]
+
+    def test_two_establishments_of_one_name_nearby_join_to_neither(
+        self, areas: list[ingest.NtaArea]
+    ) -> None:
+        """Two Starbucks either side of a street is the common case.
+
+        Crediting one of them with the other's opening hours is a coin toss, so
+        neither is credited and the record is reported as ambiguous.
+        """
+        cafes = [
+            {**self.CAFE, "id": "dohmh:1", "latitude": 40.7295, "longitude": -73.9974},
+            {**self.CAFE, "id": "dohmh:2", "latitude": 40.7296, "longitude": -73.9975},
+        ]
+        identities = {
+            "dohmh:1": ingest.CafeIdentity(name="STARBUCKS", address="1 BROADWAY"),
+            "dohmh:2": ingest.CafeIdentity(name="STARBUCKS", address="2 BROADWAY"),
+        }
+        records = [
+            {
+                "id": "n1",
+                "name": "Starbucks",
+                "latitude": 40.7295,
+                "longitude": -73.9974,
+                "house_number": None,
+                "street": None,
+                "postcode": None,
+                "indoor_seating": True,
+                "venue_wifi": True,
+                "opening_hours": "Mo-Su 06:00-20:00",
+            }
+        ]
+
+        added, merge = ingest.merge_osm_cafes(cafes, identities, records, areas)
+
+        assert added == []
+        assert merge == ingest.OsmMerge(enriched=0, added=0, ambiguous=1, unplaceable=0)
+        assert all(cafe["venue_wifi"] is None for cafe in cafes)
+
+    def test_one_establishment_claimed_by_two_osm_records_joins_to_neither_twice(
+        self, areas: list[ingest.NtaArea]
+    ) -> None:
+        """The first claim stands and the second is ambiguous.
+
+        Not "last write wins": that would make the snapshot depend on the order
+        the committed file happens to be read in, and the second record is
+        evidence that the first match was not as certain as it looked.
+        """
+        cafes = [{**self.CAFE, "id": "dohmh:1", "latitude": 40.7295, "longitude": -73.9974}]
+        identities = {"dohmh:1": ingest.CafeIdentity(name="STARBUCKS", address="1 BROADWAY")}
+        record = {
+            "id": "n1",
+            "name": "Starbucks",
+            "latitude": 40.7295,
+            "longitude": -73.9974,
+            "house_number": None,
+            "street": None,
+            "postcode": None,
+            "indoor_seating": True,
+            "venue_wifi": None,
+            "opening_hours": None,
+        }
+
+        added, merge = ingest.merge_osm_cafes(
+            cafes, identities, [record, {**record, "id": "n2", "indoor_seating": False}], areas
+        )
+
+        assert added == []
+        assert merge.enriched == 1
+        assert merge.ambiguous == 1
+        assert cafes[0]["indoor_seating"] is True
+
+    def test_a_name_match_too_far_away_is_a_different_branch(
+        self, areas: list[ingest.NtaArea]
+    ) -> None:
+        """ "Starbucks" 400 m away is a different Starbucks.
+
+        There are over a hundred in the register and the name tells them apart
+        not at all, which is why the name alone is never a match. 400 m is also
+        past OSM_SAME_STOREFRONT_METRES, so this one is published rather than
+        dropped: it is a cafe the snapshot does not have.
+        """
+        cafes = [{**self.CAFE, "id": "dohmh:1", "latitude": 40.7295, "longitude": -73.9974}]
+        identities = {"dohmh:1": ingest.CafeIdentity(name="STARBUCKS", address="1 BROADWAY")}
+        records = [
+            {
+                "id": "n1",
+                "name": "Starbucks",
+                # About 400 m north, still inside Greenwich Village.
+                "latitude": 40.7331,
+                "longitude": -73.9974,
+                "house_number": "9",
+                "street": "Broadway",
+                "postcode": None,
+                "indoor_seating": True,
+                "venue_wifi": None,
+                "opening_hours": None,
+            }
+        ]
+
+        added, merge = ingest.merge_osm_cafes(cafes, identities, records, areas)
+
+        assert merge.enriched == 0
+        assert merge.added == 1
+        assert cafes[0]["indoor_seating"] is None
+        assert added[0]["id"] == "osm:n1"
+
+    def test_the_radii_are_ordered_from_strictest_to_loosest(self) -> None:
+        # A storefront can appear to move 68 m between the two registers (95th
+        # percentile), the name alone is trusted to 150 m, and an address that
+        # agrees is trusted to 200 m. Reordering any pair would change which
+        # branch a record takes without changing a word of the logic.
+        assert (
+            ingest.OSM_SAME_STOREFRONT_METRES
+            < ingest.OSM_NAME_MATCH_RADIUS_METRES
+            < ingest.OSM_ADDRESS_MATCH_RADIUS_METRES
+        )
+
+    #: A published cafe record, as a starting point for the hand-built cases
+    #: above. Only the fields the join reads matter; the rest are the contract.
+    CAFE = {
+        "id": "dohmh:0",
+        "name": "Starbucks",
+        "category": "cafe",
+        "address": "1 Broadway, NY 10004",
+        "neighborhood": "Greenwich Village",
+        "borough": "Manhattan",
+        "latitude": 40.7295,
+        "longitude": -73.9974,
+        "university": None,
+        "operator": None,
+        "free_public_wifi": False,
+        "no_purchase_needed": False,
+        "subway_station": None,
+        "subway_routes": None,
+        "subway_metres": None,
+        "subway_step_free": None,
+        "nearby_spots": 0,
+        "outdoor_seating": False,
+        "indoor_seating": None,
+        "venue_wifi": None,
+        "opening_hours": None,
+    }
+
+
+class TestThreeStateFields:
+    """True, false and unrecorded are three answers, and stay three.
+
+    Collapsing the third into the second is the mistake these fields exist to
+    avoid, and it is the easy mistake: a truthiness test makes it silently.
+    """
+
+    def test_the_osm_fields_are_part_of_the_contract(self) -> None:
+        assert set(ingest.OSM_FIELDS) <= set(ingest.CONTRACT_FIELDS)
+
+    def test_a_cafe_with_no_osm_record_is_unrecorded_and_not_false(
+        self, merged_cafe_spots: list[dict[str, Any]]
+    ) -> None:
+        leons = published(merged_cafe_spots, "Leon's Bagels")
+
+        for field in ingest.OSM_FIELDS:
+            assert leons[field] is None, field
+
+    def test_a_library_is_unrecorded_and_not_false(self, spots: list[dict[str, Any]]) -> None:
+        # OpenStreetMap is read for cafes alone. Null is the honest value:
+        # nobody has said a branch has no indoor seating.
+        for spot in spots:
+            for field in ingest.OSM_FIELDS:
+                assert spot[field] is None, f"{spot['id']}.{field}"
+
+    def test_the_booleans_are_only_ever_true_false_or_none(
+        self, snapshot: list[dict[str, Any]]
+    ) -> None:
+        for spot in snapshot:
+            for field in ("indoor_seating", "venue_wifi"):
+                assert spot[field] in (True, False, None), f"{spot['id']}.{field}"
+
+    def test_opening_hours_is_the_raw_osm_string_or_null(
+        self, snapshot: list[dict[str, Any]]
+    ) -> None:
+        # Stored as written. Turning it into an "open now" needs a timezone and
+        # the public-holiday calendar the syntax can refer to, which is its own
+        # piece of work.
+        for spot in snapshot:
+            hours = spot["opening_hours"]
+            assert hours is None or (isinstance(hours, str) and hours.strip() == hours and hours)
+
+    def test_a_non_boolean_in_the_committed_file_is_an_error(self) -> None:
+        # The file is committed, so a hand-edit is exactly where a string lands
+        # where a boolean belongs -- and "no" is truthy.
+        with pytest.raises(ingest.IngestError, match="non-boolean venue_wifi"):
+            ingest.osm_attributes({"id": "n1", "venue_wifi": "no"})
+
+    def test_venue_wifi_is_not_free_public_wifi(self, snapshot: list[dict[str, Any]]) -> None:
+        """Two different claims, and the snapshot proves they are not the same.
+
+        One is the venue's own Wi-Fi as recorded by somebody who was there; the
+        other is a hotspot the city publishes within 25 m of the point. If the
+        two agreed everywhere, one of them would be redundant.
+        """
+        disagree = [
+            spot
+            for spot in snapshot
+            if spot["venue_wifi"] is not None and spot["venue_wifi"] != spot["free_public_wifi"]
+        ]
+
+        assert disagree
+
+
+class TestTheOsmCafeFile:
+    """The committed cafe list, read the way the subway station list is."""
+
+    def test_a_missing_file_is_a_warning_and_not_an_error(self, tmp_path: Path) -> None:
+        # `just ingest` without `just ingest-osm` publishes DOHMH cafes with
+        # three unrecorded fields, which is a smaller snapshot and not a broken
+        # one.
+        assert ingest.osm_cafes(tmp_path / "absent.json") == []
+
+    def test_a_json_object_is_an_error(self, tmp_path: Path) -> None:
+        path = tmp_path / "osm_cafes.json"
+        path.write_text('{"id": "n1"}', encoding="utf-8")
+
+        with pytest.raises(ingest.IngestError, match="array of cafes"):
+            ingest.osm_cafes(path)
+
+    def test_the_committed_file_is_the_shape_the_importer_reads(self) -> None:
+        cafes = ingest.osm_cafes()
+
+        assert cafes
+        for cafe in cafes:
+            assert set(cafe) == {
+                "id",
+                "name",
+                "latitude",
+                "longitude",
+                "house_number",
+                "street",
+                "postcode",
+                "indoor_seating",
+                "venue_wifi",
+                "opening_hours",
+            }
+
+    def test_every_identifier_is_a_node_or_a_way_and_has_no_slash(self) -> None:
+        # A spot identifier becomes a URL path segment, so OSM's own
+        # "node/3506087030" would be two segments and a 404.
+        for cafe in ingest.osm_cafes():
+            assert cafe["id"][0] in "nw"
+            assert cafe["id"][1:].isdigit()
+
+    def test_the_committed_snapshot_publishes_the_source(
+        self, snapshot: list[dict[str, Any]]
+    ) -> None:
+        osm_spots = [spot for spot in snapshot if spot["id"].startswith(f"{ingest.OSM_PREFIX}:")]
+
+        assert osm_spots
+        assert all(spot["category"] == ingest.CAFE_CATEGORY for spot in osm_spots)
+
+    def test_the_committed_snapshot_still_has_its_dohmh_cafes(
+        self, snapshot: list[dict[str, Any]]
+    ) -> None:
+        """Additive: the OSM merge may not cost a DOHMH establishment.
+
+        A floor rather than an exact count, deliberately. DOHMH is an
+        inspection log that moves daily -- two runs an hour apart gave 16 and
+        17 closures -- so pinning the published figure would make this fail
+        because a coffee shop in Queens shut, which is not what it is testing.
+
+        The exact property, before against after on one run, is asserted by
+        `TestOpenStreetMapIsAdditive`, where both sides come from the same
+        upstream snapshot and the number cannot drift between them.
+        """
+        dohmh = [spot for spot in snapshot if spot["id"].startswith(f"{ingest.CAFE_PREFIX}:")]
+
+        assert len(dohmh) > 2000
+
+
+class TestAPartialAddressIsNotAnAddress:
+    """A street with no house number cannot decide whether two records are one door.
+
+    Worse than useless: compared against "123 Broadway" it *disagrees*, and the
+    merge reads a disagreement as evidence of two separate storefronts. So a
+    partial address is no address, and the record joins on name and proximity
+    like the 831 cafes that carry none at all.
+    """
+
+    def test_a_street_with_no_number_is_no_key(self) -> None:
+        assert osm_key({"street": "Broadway"}) == ""
+
+    def test_a_number_with_no_street_is_no_key(self) -> None:
+        assert osm_key({"house_number": "123"}) == ""
+
+    def test_both_together_are_a_key(self) -> None:
+        assert osm_key({"house_number": "123", "street": "Broadway"}) == "123 BROADWAY"
+
+    def test_the_key_folds_the_two_registers_onto_one_spelling(self) -> None:
+        # DOHMH writes "MACDOUGAL ST" where OSM writes "MacDougal Street", and
+        # neither is wrong. Street types, compass directions and ordinals are
+        # folded before comparing; the key is never published.
+        assert osm_key({"house_number": "119", "street": "MacDougal Street"}) == "119 MACDOUGAL ST"
+        assert osm_key({"house_number": "1875", "street": "Utica Avenue"}) == "1875 UTICA AVE"
+        assert osm_key({"house_number": "405", "street": "West 23rd Street"}) == "405 W 23 ST"
+
+    def test_a_cafe_with_only_a_street_near_a_dohmh_cafe_is_not_published(
+        self, areas: list[ingest.NtaArea]
+    ) -> None:
+        # Without this it would read as "a different address, therefore a
+        # different storefront" and be published as a second pin.
+        cafes = [{**TestOpenStreetMapMatching.CAFE, "id": "dohmh:1"}]
+        identities = {"dohmh:1": ingest.CafeIdentity(name="STARBUCKS", address="1 BROADWAY")}
+        records = [
+            {
+                "id": "n1",
+                "name": "Some Other Cafe",
+                "latitude": 40.7295,
+                "longitude": -73.9974,
+                "house_number": None,
+                "street": "Broadway",
+                "postcode": None,
+                "indoor_seating": None,
+                "venue_wifi": None,
+                "opening_hours": None,
+            }
+        ]
+
+        added, merge = ingest.merge_osm_cafes(cafes, identities, records, areas)
+
+        assert added == []
+        assert merge.ambiguous == 1
+
+
+class TestCuratedBuildingsWinDuplicates:
+    """A curated building beats the open-data row describing the same building.
+
+    FacDB registers "New York University Libraries" as an academic library at
+    Bobst's coordinates, 12 m from `nyu:bobst-library`, with the *building
+    name* where a street address belongs and "LIU-New York University Campus"
+    -- Long Island University -- as its campus. A search for "bobst" returned
+    both, because the search vector includes the address.
+
+    Every test below is about the two conditions that keep the rule from
+    deleting records that are not duplicates.
+    """
+
+    #: A curated building, as `nyu_buildings.json` supplies it.
+    BUILDING = {
+        **TestOpenStreetMapMatching.CAFE,
+        "id": "nyu:bobst-library",
+        "name": "Elmer Holmes Bobst Library",
+        "category": "academic_library",
+        "address": "70 Washington Square South, New York, NY 10012",
+        "no_purchase_needed": True,
+        "operator": "New York University",
+        "university": "New York University",
+        "latitude": 40.7295,
+        "longitude": -73.9974,
+    }
+
+    def near(self, **overrides: Any) -> dict[str, Any]:
+        """An open-data record 12 m from the curated building."""
+        return {
+            **TestOpenStreetMapMatching.CAFE,
+            "id": "facdb:generic",
+            "name": "New York University Libraries",
+            "category": "academic_library",
+            "address": "Elmer H Bobst Library, New York, NY 10012",
+            "latitude": 40.72949,
+            "longitude": -73.99726,
+            **overrides,
+        }
+
+    def test_the_building_recorded_twice_is_published_once(self) -> None:
+        kept, dropped = ingest.drop_curated_duplicates([self.BUILDING, self.near()])
+
+        assert [spot["id"] for spot in kept] == ["nyu:bobst-library"]
+        assert dropped == [("New York University Libraries", "Elmer Holmes Bobst Library")]
+
+    def test_a_cafe_in_the_same_building_is_not_a_duplicate(self) -> None:
+        """The condition that protects nine real records.
+
+        Nine non-curated records sit within 60 m of a curated building in the
+        live data and every one is a cafe: Peet's Coffee @ NYU is 10 m from the
+        Kimmel Center, Blank Street Coffee 26 m from Rogers Hall, The Uncommons
+        24 m from the Global Center. They are cafes inside or beside the
+        building, and they are separate study spots. A rule that went on
+        distance alone would delete all nine to fix one duplicate.
+        """
+        cafe = self.near(id="dohmh:peets", name="Peet's Coffee @ NYU", category="cafe")
+
+        kept, dropped = ingest.drop_curated_duplicates([self.BUILDING, cafe])
+
+        assert dropped == []
+        assert {spot["id"] for spot in kept} == {"nyu:bobst-library", "dohmh:peets"}
+
+    def test_a_library_with_its_own_street_address_is_not_a_duplicate(self) -> None:
+        """The condition that is easy to leave out, and costs a real record.
+
+        *Two* academic libraries sit within 50 m of Bobst. The second is "NYU
+        Tamiment Library" at 17 m -- the Tamiment Library and Robert F. Wagner
+        Labor Archives, a named special collection on Bobst's tenth floor,
+        publishing its own street address. It is a library someone might search
+        for by name and it is not a duplicate of anything. Same category and
+        well inside the radius, so only the address tells it apart.
+        """
+        tamiment = self.near(
+            id="facdb:tamiment",
+            name="NYU Tamiment Library",
+            address="70 Washington Square South, New York, NY 10012",
+            latitude=40.729437,
+            longitude=-73.997217,
+        )
+
+        kept, dropped = ingest.drop_curated_duplicates([self.BUILDING, tamiment])
+
+        assert dropped == []
+        assert "facdb:tamiment" in {spot["id"] for spot in kept}
+
+    def test_the_street_may_be_the_curated_records_own(self) -> None:
+        # Tamiment is at Bobst's address, because it is on Bobst's tenth floor.
+        # The test is whether the record claims an address, not whether the
+        # address differs.
+        assert self.BUILDING["address"] == "70 Washington Square South, New York, NY 10012"
+
+    def test_a_record_with_no_address_at_all_is_dropped(self) -> None:
+        # Same reasoning as the building name: a row that cannot say what
+        # street it is on, sitting on a curated building of the same kind, has
+        # recorded that building.
+        kept, dropped = ingest.drop_curated_duplicates([self.BUILDING, self.near(address=None)])
+
+        assert [spot["id"] for spot in kept] == ["nyu:bobst-library"]
+        assert len(dropped) == 1
+
+    def test_the_same_record_across_the_street_is_kept(self) -> None:
+        # Two records of one category 200 m apart are two places.
+        far = self.near(latitude=40.7313, longitude=-73.9974)
+
+        kept, dropped = ingest.drop_curated_duplicates([self.BUILDING, far])
+
+        assert dropped == []
+        assert len(kept) == 2
+
+    def test_a_curated_record_is_never_dropped_for_another_curated_record(self) -> None:
+        # Two curated buildings can legitimately be metres apart, and neither
+        # was written by the open-data importer.
+        second = {**self.BUILDING, "id": "nyu:kimmel", "name": "Kimmel Center", "address": None}
+
+        kept, dropped = ingest.drop_curated_duplicates([self.BUILDING, second])
+
+        assert dropped == []
+        assert len(kept) == 2
+
+    def test_nothing_happens_without_a_curated_list(self) -> None:
+        # `--fixtures` runs and most of the test suite map facilities alone.
+        spots = [self.near()]
+
+        kept, dropped = ingest.drop_curated_duplicates(spots)
+
+        assert kept == spots
+        assert dropped == []
+
+    def test_combine_applies_it(self) -> None:
+        spots = ingest.combine([self.near()], [self.BUILDING])
+
+        assert [spot["id"] for spot in spots] == ["nyu:bobst-library"]
+
+    def test_it_runs_before_the_neighbour_count(self) -> None:
+        # A record about to be dropped must not be counted as somebody else's
+        # neighbour, or the curated building reports a neighbour that is itself.
+        spots = ingest.combine([self.near()], [self.BUILDING])
+
+        assert spots[0]["nearby_spots"] == 0
+
+
+class TestTheCommittedSnapshotHasNoCuratedDuplicates:
+    def test_bobst_matches_exactly_one_record(self, snapshot: list[dict[str, Any]]) -> None:
+        # Name *and* address, because the search vector weights both and the
+        # duplicate carried "Bobst" in its address rather than its name.
+        matching = [
+            spot
+            for spot in snapshot
+            if "bobst" in f"{spot['name']} {spot['address'] or ''}".lower()
+        ]
+
+        assert [spot["id"] for spot in matching] == ["nyu:bobst-library"]
+
+    def test_every_curated_building_survives(self, snapshot: list[dict[str, Any]]) -> None:
+        curated = [spot for spot in snapshot if spot["id"].startswith(f"{ingest.CURATED_PREFIX}:")]
+
+        assert len(curated) == len(ingest.curated_spots())
+
+    def test_the_cafes_beside_the_curated_buildings_survive(
+        self, snapshot: list[dict[str, Any]]
+    ) -> None:
+        # The nine the rule is written around. Named rather than counted, so a
+        # future loosening of the rule names which one it deleted.
+        names = {spot["name"] for spot in snapshot}
+
+        for cafe in (
+            "Peet's Coffee @ NYU",
+            "Blank Street Coffee",
+            "The Uncommons",
+            "Think Coffee",
+            "Tartinery",
+            "Irving Farm New York",
+            "Ariston Flowers & Cafe",
+            "Colomba Bakery",
+        ):
+            assert cafe in names, cafe
+
+    def test_nothing_non_curated_shares_a_category_and_a_doorstep(
+        self, snapshot: list[dict[str, Any]]
+    ) -> None:
+        curated = [spot for spot in snapshot if spot["id"].startswith(f"{ingest.CURATED_PREFIX}:")]
+
+        for building in curated:
+            for spot in snapshot:
+                if spot["id"].startswith(f"{ingest.CURATED_PREFIX}:"):
+                    continue
+                if spot["category"] != building["category"]:
+                    continue
+                metres = ingest.haversine_metres(
+                    building["latitude"],
+                    building["longitude"],
+                    spot["latitude"],
+                    spot["longitude"],
+                )
+                if metres <= ingest.CURATED_DUPLICATE_METRES:
+                    # Survives only by claiming a street address of its own.
+                    assert ingest.HOUSE_NUMBER.match(spot["address"] or ""), spot["id"]

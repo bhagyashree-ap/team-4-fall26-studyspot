@@ -33,6 +33,12 @@ LOOKUPS = {
     "borough": "borough__iexact",
     "free_public_wifi": "free_public_wifi",
     "no_purchase_needed": "no_purchase_needed",
+    # Three-state, and the plain lookup is what makes it behave correctly:
+    # `indoor_seating=True` and `indoor_seating=False` each compile to an
+    # equality test, which SQL does not satisfy for NULL. So each value selects
+    # the rows recorded as that answer and the unrecorded majority falls out of
+    # both, which is the only honest reading of a filter on this field.
+    "indoor_seating": "indoor_seating",
 }
 
 
@@ -244,5 +250,10 @@ class SpotFacetsView(APIView):
         body["no_purchase_needed"] = (
             narrow("no_purchase_needed").filter(no_purchase_needed=True).count()
         )
+        # Counted as `=True` rather than as "not false", so the number is how
+        # many spots somebody has actually recorded indoor seating for. It is
+        # small -- around 112 citywide -- and that is the point: padding it
+        # with the unrecorded majority would make the count a guess.
+        body["indoor_seating"] = narrow("indoor_seating").filter(indoor_seating=True).count()
 
         return Response(body)

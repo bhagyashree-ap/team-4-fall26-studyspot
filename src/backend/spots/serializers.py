@@ -43,6 +43,9 @@ class StudySpotSerializer(serializers.ModelSerializer):
             "subway_step_free",
             "nearby_spots",
             "outdoor_seating",
+            "indoor_seating",
+            "venue_wifi",
+            "opening_hours",
         ]
 
 
@@ -111,6 +114,33 @@ def wifi_field() -> serializers.BooleanField:
         allow_null=True,
         default=None,
         help_text="Restrict to spots with, or without, free public Wi-Fi nearby.",
+    )
+
+
+def indoor_seating_field() -> serializers.BooleanField:
+    """The indoor-seating filter, over a field with three states rather than two.
+
+    Which changes what ``false`` means here, compared with the two filters
+    above. ``?free_public_wifi=false`` is "places with no city hotspot nearby",
+    which is most of the snapshot. ``?indoor_seating=false`` is "places somebody
+    has recorded as having nowhere to sit inside", which is 13 spots -- not
+    "places not known to have indoor seating", which would be 3,647 and would
+    be claiming something about every one of them.
+
+    Both values therefore exclude the unrecorded majority. That is the only
+    reading that does not assert what nobody has written down, and it is why
+    this filter exists while ``venue_wifi`` and ``opening_hours`` have none.
+    """
+    return serializers.BooleanField(
+        required=False,
+        allow_null=True,
+        default=None,
+        help_text=(
+            "Restrict to spots recorded as having somewhere to sit inside, or to those "
+            "recorded as having nowhere. Either value excludes the spots nobody has "
+            "recorded, which is most of them: this filter narrows to a recorded answer "
+            "rather than to the absence of one."
+        ),
     )
 
 
@@ -185,6 +215,7 @@ class SpotQuerySerializer(StrictQuerySerializer):
     )
     free_public_wifi = wifi_field()
     no_purchase_needed = cost_field()
+    indoor_seating = indoor_seating_field()
     borough = borough_field()
     university = filter_field(
         "Case-insensitive exact match on the institution a spot belongs to. Only "
@@ -215,6 +246,7 @@ class SpotSearchQuerySerializer(StrictQuerySerializer):
     university = filter_field("Case-insensitive exact match on the campus.")
     free_public_wifi = wifi_field()
     no_purchase_needed = cost_field()
+    indoor_seating = indoor_seating_field()
 
     limit = limit_field()
     offset = offset_field()
@@ -247,3 +279,4 @@ class SpotFacetsQuerySerializer(StrictQuerySerializer):
     university = filter_field("Case-insensitive exact match on the campus.")
     free_public_wifi = wifi_field()
     no_purchase_needed = cost_field()
+    indoor_seating = indoor_seating_field()

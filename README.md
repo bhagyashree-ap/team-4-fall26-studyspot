@@ -4,7 +4,7 @@
 
 **Live at <https://d1ulyrfyi06kwp.cloudfront.net>**
 
-StudySpot is an open-source search demo for discovering cafés and other third places across New York City. The goal is to make finding a useful place feel immediate: search by a name, category, or neighborhood and get a small, consistent set of results derived from NYC Open Data.
+StudySpot is an open-source search demo for discovering cafés and other third places across New York City. The goal is to make finding a useful place feel immediate: search by a name, category, or neighborhood and get a small, consistent set of results derived from NYC Open Data and OpenStreetMap.
 
 > [!IMPORTANT]
 > StudySpot is deployed and working. `data/spots.json` holds 2,422 real places — 2,158 cafés, 227 public library branches, 21 special libraries, and 16 academic libraries and NYU campus buildings — 429 of them with a free public Wi-Fi hotspot nearby, and 108 cafés with a sidewalk-dining licence. Every one is somewhere a person can go: the city's 126 campus records anchor the "near which campus" label but are not published as spots, because an institution's administrative point is not a room. Search runs entirely in Postgres: full text ranks across name, campus, neighborhood and address, with trigram similarity behind it for misspellings, and it searches as you type. Results filter by borough, type, campus, and Wi-Fi. A spot detail page is the notable gap.
@@ -16,7 +16,8 @@ StudySpot is a small modular monolith: one application, one versioned public-dat
 ```text
 Browser -> SvelteKit -> Django REST Framework -> Postgres
 
-NYC Open Data -> ingest.py -> spots.json -> Postgres
+NYC Open Data  -\
+OpenStreetMap  --- ingest.py -> spots.json -> Postgres
 ```
 
 The [Svelte 5](https://svelte.dev/) frontend owns the search experience. A [Django](https://www.djangoproject.com/) application with [Django REST Framework](https://www.django-rest-framework.org/) provides the HTTP boundary, and one model defines the study spot that the routes, the loader, and the search ranking all share. [Postgres](https://www.postgresql.org/) is both the serving database and the search engine, and deliberately the only one. Full-text search over a generated, weighted `tsvector` column finds every word someone typed across the name, campus, neighborhood and address; `pg_trgm` similarity sits behind it for the misspellings full text cannot match. Both are GIN-indexed, which is ample for a few hundred records and removes a moving part from the deployment. The normalized NYC Open Data snapshot remains the reproducible source used to load it.
@@ -61,7 +62,7 @@ Four routes are available alongside `GET /health/live`, none of them with a trai
 
 See the [HTTP API guide](docs/source/api.md).
 
-Every spot also has its own page at `/spots/{id}`. All 2,422 are prerendered at build time from the committed snapshot, so each is real HTML in S3 rather than a route the browser assembles: the link works in a fresh tab, in a shared message, and to a crawler, with no request on load. The nearby-spots list on each page is computed at build time from the same coordinates the importer uses.
+Every spot also has its own page at `/spots/{id}`. All 3,772 are prerendered at build time from the committed snapshot, so each is real HTML in S3 rather than a route the browser assembles: the link works in a fresh tab, in a shared message, and to a crawler, with no request on load. The nearby-spots list on each page is computed at build time from the same coordinates the importer uses.
 
 ## Development
 
@@ -130,7 +131,7 @@ just dev-backend
 
 ### Loading data
 
-The data boundary lives in [`data/`](data/): `ingest.py` normalizes four NYC Open Data datasets and a curated list of NYU buildings into `spots.json`, and `test_ingest.py` verifies the mapping against a committed sample of upstream records. Copy the snapshot into the local database before using the study-spot routes:
+The data boundary lives in [`data/`](data/): `ingest.py` normalizes four NYC Open Data datasets, the OpenStreetMap cafés `osm.py` fetches from the Overpass API, and a curated list of NYU buildings into `spots.json`. `test_ingest.py` and `test_osm.py` verify the mapping against a committed sample of upstream records. Copy the snapshot into the local database before using the study-spot routes:
 
 ```shell
 just load-data
@@ -140,6 +141,12 @@ The snapshot is in version control, so this needs no network. Regenerate it from
 
 ```shell
 just ingest
+```
+
+The OpenStreetMap cafés are a committed snapshot of their own, refreshed separately, because one Overpass request takes about 45 seconds against a volunteer-run service:
+
+```shell
+just ingest-osm
 ```
 
 The loader validates every record against the shared model and replaces the table's contents in one transaction, so it is safe to re-run and the table can only ever hold records the API can serve.
@@ -187,7 +194,7 @@ Useful starting points include the [architecture](docs/source/architecture.md), 
 
 - **Frontend:** Svelte 5, TypeScript, SvelteKit, Vite, Tailwind CSS, Bun
 - **Backend:** Python 3.12, Django 5.2, Django REST Framework, uv
-- **Data source:** NYC Open Data
+- **Data sources:** NYC Open Data, OpenStreetMap
 - **Database and search:** Postgres, with full-text search and `pg_trgm` — a container locally, Amazon RDS on AWS
 - **Deployment:** AWS (CloudFront, S3, API Gateway, Lambda, RDS) with Terraform
 - **Operations:** Nix, Docker Compose, just, pre-commit, GitHub Actions

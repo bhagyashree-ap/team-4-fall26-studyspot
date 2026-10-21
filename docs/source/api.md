@@ -41,11 +41,14 @@ No route has a trailing slash, and the application does not redirect one onto th
   "subway_metres": 180,
   "subway_step_free": "full",
   "nearby_spots": 23,
-  "outdoor_seating": false
+  "outdoor_seating": false,
+  "indoor_seating": null,
+  "venue_wifi": null,
+  "opening_hours": null
 }
 ```
 
-The records represent public third places from NYC Open Data — today the libraries of the city's facilities database, the coffee shops of the health department's inspection register, and a curated list of NYU campus buildings. They are candidate gathering and study locations; the API must not imply that unverified amenities are available. This response shape belongs to the shared contract. Changes require review from frontend, API, data, and search owners.
+The records represent public third places — today the libraries of the city's facilities database, the coffee shops of the health department's inspection register, the cafés OpenStreetMap contributors have mapped, and a curated list of NYU campus buildings. They are candidate gathering and study locations; the API must not imply that unverified amenities are available. This response shape belongs to the shared contract. Changes require review from frontend, API, data, and search owners.
 
 `category` currently takes one of `cafe`, `public_library`, `special_library`, `academic_library` and `university_building`.
 
@@ -53,11 +56,11 @@ The records represent public third places from NYC Open Data — today the libra
 
 `university_building` is a campus building a student can work in. The city's facilities database registers institutions and administrative points rather than buildings, so these come from the curated list in `data/nyu_buildings.json` and all carry the `nyu:` identifier prefix. The institution records themselves are *not* published: an administrative point is not a room, and campus access is restricted. They are read only to anchor the `university` label.
 
-`cafe` comes from the health department's own `Coffee/Tea` cuisine classification: see [Data and search](data-and-search.md). It used to come from the outdoor-dining licence register, which published any business holding a sidewalk licence as a café — bars, pizzerias and restaurants among them — and missed every indoor-only coffee shop. The API does not constrain the value: the vocabulary belongs to the importer, and pinning it in the serving schema would put every category change through a migration.
+`cafe` comes from two sources read together: the health department's own `Coffee/Tea` cuisine classification, and OpenStreetMap's `amenity=cafe`. See [Data and search](data-and-search.md). The health department decides which establishments exist and where; OpenStreetMap adds the three attributes below and the cafés the health department files under some other cuisine — Caffe Reggio, on MacDougal Street since 1927, is recorded as `Italian` and so is in one source and not the other. It used to come from the outdoor-dining licence register, which published any business holding a sidewalk licence as a café — bars, pizzerias and restaurants among them — and missed every indoor-only coffee shop. The API does not constrain the value: the vocabulary belongs to the importer, and pinning it in the serving schema would put every category change through a migration.
 
-`nearby_spots` is how many other study spots are within 400 m, about a five-minute walk. **It counts places, not people.** A café on a dense stretch may be empty and an isolated library may be packed; nothing in open data knows. What it supports is how lively the surrounding block is, and whether there is anywhere else to go if this one is full. The browser bands it into Quiet, Moderate and Busy at 0 and 10, chosen from the real distribution — the median by borough is Manhattan 23, Brooklyn 5, Queens 3, Bronx 1, Staten Island 1 — and always shows the count beside the word, because a label you can check is a different thing from one you have to trust.
+`nearby_spots` is how many other study spots are within 400 m, about a five-minute walk. **It counts places, not people.** A café on a dense stretch may be empty and an isolated library may be packed; nothing in open data knows. What it supports is how lively the surrounding block is, and whether there is anywhere else to go if this one is full. The browser bands it into Quiet, Moderate and Busy at 0 and 10, chosen from the real distribution — the median by borough is Manhattan 32, Brooklyn 9, Queens 6, Bronx 1, Staten Island 2 — and always shows the count beside the word, because a label you can check is a different thing from one you have to trust.
 
-`subway_station`, `subway_routes`, `subway_metres` and `subway_step_free` are the nearest station within 1.2 km, derived by the importer from the MTA's own list. All four are null together — 182 of 2,422 spots have none that close, mostly on Staten Island where the railway is not the subway. The distance is straight-line rather than walking, `routes` is space separated as the MTA publishes it, and `step_free` keeps their three states: `full`, `none`, and `partial` for a platform reachable going one way and not the other.
+`subway_station`, `subway_routes`, `subway_metres` and `subway_step_free` are the nearest station within 1.2 km, derived by the importer from the MTA's own list. All four are null together — 285 of 3,772 spots have none that close, mostly on Staten Island where the railway is not the subway. The distance is straight-line rather than walking, `routes` is space separated as the MTA publishes it, and `step_free` keeps their three states: `full`, `none`, and `partial` for a platform reachable going one way and not the other.
 
 `no_purchase_needed` is true where sitting down costs nothing — every library and every campus building, and no café. It answers the question a reader actually has, which no single category answers, and **it is about money rather than entry**: a campus building is free and still wants the university's credentials, and a special library may be open only by appointment.
 
@@ -71,6 +74,18 @@ is not the same as there being no Wi-Fi: a campus building's network needs the
 university's credentials, and the city has no reason to know about it. The field
 answers whether *anyone* can use Wi-Fi there. `borough` is one of the five
 borough names and the database refuses any other. `neighborhood` is the 2020 Neighborhood Tabulation Area name and is `null` when NYC Open Data does not place the record in one.
+
+### The three fields where `null` is an answer
+
+`indoor_seating`, `venue_wifi` and `opening_hours` come from OpenStreetMap, and they are the only three fields in the contract where `null` means *nobody has recorded this* rather than *this record has no such thing*. **A consumer must not read `null` as `false`.** Everywhere else in this contract a null is an absence of the thing — a café has no operator, a spot with no station inside 1.2 km has no station — and treating it as a negative is harmless. Here it is the difference between "somebody went and looked and there is no Wi-Fi" and "nobody has said", and the whole reason the source is read is to be able to tell those apart.
+
+`venue_wifi` is Wi-Fi the venue itself provides, as recorded by a contributor. **It is a different claim from `free_public_wifi` and the two must not be merged or shown as one.** `free_public_wifi` is a hotspot *the city publishes* within 25 m of the point, which is usually a library's own and occasionally a LinkNYC kiosk on the pavement; a café can easily have its own Wi-Fi and no city hotspot anywhere near it, and a library the reverse. Their falses are also worth different amounts: a false here is a trustworthy negative, while a false `free_public_wifi` only ever meant that nothing the city publishes is nearby. Derived from OpenStreetMap's `internet_access`, where `wlan`, `yes` and `wifi` are true and `no` is false. `wired` and `terminal` read as `null`, not as false: an ethernet port and a public computer each say there is internet without saying whether there is Wi-Fi. 295 spots are true, 42 false, 3,435 unrecorded.
+
+`indoor_seating` is true where a contributor has recorded somewhere to sit inside, false where one has recorded that there is nowhere, and `null` otherwise. 112 true, 13 false, 3,647 unrecorded. It is rare because that is how many contributors have tagged it, and nothing infers it from anything else — not from the category, not from the presence of a sidewalk licence, not from the words in the name.
+
+`opening_hours` is OpenStreetMap's own [opening hours syntax](https://wiki.openstreetmap.org/wiki/Key:opening_hours), served as the raw string: `Mo-Fr 07:00-19:00; Sa-Su 08:00-18:00`. 1,134 spots carry one, all of them cafés — no city source publishes a library's schedule. It is deliberately **not** turned into an "open now" flag, by this API or by the importer. Evaluating the syntax correctly needs a timezone and the public-holiday calendar the syntax can refer to, and telling someone a closed café is open is worse than telling them nothing. A client that wants "open now" has to take that on knowingly.
+
+`indoor_seating` has a filter and an index; `venue_wifi` and `opening_hours` have neither, for the reason `outdoor_seating` has neither — they are attributes the API reports rather than ones it narrows on, and an index on a column nothing queries is a write cost for nothing. The asymmetry is deliberate. A filter over a three-state column has to decide what `false` means about the unrecorded majority, and only `indoor_seating` has an answer worth offering: "recorded as having nowhere to sit inside" is a real, if small, thing to ask for. See [Filtering](#filtering) for exactly what each value selects.
 
 ```{important}
 `university` is an addition to the previously agreed contract and still needs owner sign-off. It is proximity and nothing else: it names the closest campus within 500 metres, or the campus itself for a campus record, and is `null` when no campus is that close. The campus list is curated — the college and university records of the city's facilities database — and the field is never guessed from a spot's name, its operator, or anything else. It is not an affiliation, an endorsement, or an access claim: a named campus does not mean the institution is connected to the spot or that the public may use the room. In the example above, 169 metres separate a public library branch from a campus with no relationship to it.
@@ -153,7 +168,8 @@ Every non-2xx response uses one envelope:
 ## Filtering
 
 Both `GET /spots` and `GET /spots/search` take the same filters: `neighborhood`,
-`borough`, `category`, `university`, `free_public_wifi`, and `no_purchase_needed`. They combine with
+`borough`, `category`, `university`, `free_public_wifi`, `no_purchase_needed`, and
+`indoor_seating`. They combine with
 AND, so supplying two narrows rather than widens, and on the search endpoint
 they narrow the candidates *before* ranking. Filtering after ranking would drop
 the best matches out of a page rather than out of the result set, and the
@@ -162,6 +178,22 @@ reported total would describe something the caller never sees.
 `free_public_wifi` and `no_purchase_needed` each take `true` or `false`. False
 is a filter in its own right -- places that do expect a purchase, which is every
 café -- not the absence of one.
+
+`indoor_seating` also takes `true` or `false`, and **its `false` does not mean
+what the other two mean.** The column has three states, so `?indoor_seating=false`
+is "places somebody recorded as having nowhere to sit inside" -- 13 spots -- and
+*not* "places not known to have indoor seating", which would be 3,647 and would
+be asserting something about every one of them. Both values therefore exclude
+the unrecorded majority: this filter narrows to a recorded answer rather than to
+the absence of one. `?indoor_seating=true` returns around 112 spots, which is how
+many contributors have tagged, and a client showing this control should show the
+facet count beside it so a reader can see that before ticking.
+
+`venue_wifi` and `opening_hours` have no filter, and that is not an oversight.
+`?venue_wifi=false` would be a question whose honest answer is 42 rows and whose
+tempting wrong answer is 3,435, and a schedule in OpenStreetMap's syntax is not
+something to match on without evaluating it -- see
+[the three fields where `null` is an answer](#the-three-fields-where-null-is-an-answer).
 
 A present but empty parameter is a `422`, the same as an unrecognized one: a
 filter whose value was lost should fail rather than quietly widen the search.
@@ -173,8 +205,9 @@ filter whose value was lost should fail rather than quietly widen the search.
   "boroughs": [{ "value": "Manhattan", "count": 151 }],
   "categories": [{ "value": "library", "count": 248 }],
   "universities": [{ "value": "New York University", "count": 12 }],
-  "free_public_wifi": 465,
-  "no_purchase_needed": 264
+  "free_public_wifi": 567,
+  "no_purchase_needed": 264,
+  "indoor_seating": 112
 }
 ```
 
@@ -185,9 +218,12 @@ snapshot contains, so a hard-coded list would silently stop matching when the
 data changes. Counts are included because offering a value that matches nothing
 is worse than not offering it.
 
-`free_public_wifi` and `no_purchase_needed` are single numbers rather than lists
-of values, because the controls they serve are checkboxes: the only useful count
-is how many spots remain when each is ticked.
+`free_public_wifi`, `no_purchase_needed` and `indoor_seating` are single numbers
+rather than lists of values, because the controls they serve are checkboxes: the
+only useful count is how many spots remain when each is ticked. `indoor_seating`
+counts the spots recorded as *having* it rather than the spots not recorded as
+lacking it, so it is small on purpose -- padding it with the unrecorded majority
+would make the number a guess.
 
 The endpoint takes every filter the listing endpoints take, plus `q`, all
 optional, and no `limit` or `offset` -- a facet list is as long as the number of
@@ -201,8 +237,8 @@ narrowing the results: under `?borough=Bronx` the unfiltered category counts
 would still offer a type the Bronx does not contain. Its own filter is left out
 so that a chosen value does not hide the alternatives -- with `?borough=Bronx`
 all five boroughs are still listed, so there is a way to switch, while
-`categories`, `universities`, `free_public_wifi` and `no_purchase_needed` narrow
-to the Bronx.
+`categories`, `universities`, `free_public_wifi`, `no_purchase_needed` and
+`indoor_seating` narrow to the Bronx.
 
 A client that filters should refetch this whenever the filters or the query
 change, which is one request per interaction. Returning results and facets in

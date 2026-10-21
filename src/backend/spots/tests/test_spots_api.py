@@ -66,6 +66,10 @@ RECORDS: list[dict[str, Any]] = [
         "latitude": 40.7442,
         "longitude": -74.0,
         "university": None,
+        # An OpenStreetMap contributor recorded somewhere to sit inside.
+        "indoor_seating": True,
+        "venue_wifi": True,
+        "opening_hours": "Mo-Fr 07:00-19:00; Sa-Su 08:00-18:00",
     },
     {
         "id": "dohmh:hundred",
@@ -78,6 +82,11 @@ RECORDS: list[dict[str, Any]] = [
         "latitude": 40.7304,
         "longitude": -73.9543,
         "university": None,
+        # And one recorded that there is nowhere, which is a different answer
+        # from the three records above, where nobody has said.
+        "indoor_seating": False,
+        "venue_wifi": False,
+        "opening_hours": None,
     },
 ]
 
@@ -104,6 +113,9 @@ CONTRACT_FIELDS = {
     "subway_step_free",
     "nearby_spots",
     "outdoor_seating",
+    "indoor_seating",
+    "venue_wifi",
+    "opening_hours",
 }
 
 
@@ -428,3 +440,88 @@ class TestTheCampusFilter:
     ) -> None:
         # Documented behaviour: filtering on the column excludes NULLs.
         assert "campus:none" not in self.ids(client, "New York")
+
+
+class TestIndoorSeatingFilter:
+    """A filter over a column with three states rather than two.
+
+    Which makes it behave differently from the two boolean filters beside it,
+    and the difference is the whole of what these tests hold. `?free_public_wifi
+    =false` means "no city hotspot nearby", which is most of the snapshot.
+    `?indoor_seating=false` means "somebody recorded that there is nowhere to
+    sit inside" -- 13 spots citywide -- and *not* "not known to have indoor
+    seating", which would be thousands and would claim something about every
+    one of them.
+
+    So both values exclude the unrecorded majority. An equality test is what
+    gets this right for free: SQL does not satisfy `= TRUE` or `= FALSE` for
+    NULL.
+    """
+
+    def test_true_returns_only_the_spots_recorded_as_having_it(
+        self, client: Any, spots: list[StudySpot]
+    ) -> None:
+        body = client.get("/spots", {"indoor_seating": "true"}).json()
+
+        assert [item["id"] for item in body["items"]] == ["dohmh:grumpy"]
+
+    def test_false_returns_only_the_spots_recorded_as_lacking_it(
+        self, client: Any, spots: list[StudySpot]
+    ) -> None:
+        body = client.get("/spots", {"indoor_seating": "false"}).json()
+
+        assert [item["id"] for item in body["items"]] == ["dohmh:hundred"]
+
+    def test_false_does_not_return_the_spots_nobody_has_recorded(
+        self, client: Any, spots: list[StudySpot]
+    ) -> None:
+        # The mistake this filter is written to avoid. Three of the five records
+        # have no recorded answer, and a `false` that swept them in would be
+        # asserting something about every library in the city.
+        body = client.get("/spots", {"indoor_seating": "false"}).json()
+
+        assert body["pagination"]["total"] == 1
+
+    def test_omitting_it_narrows_nothing(self, client: Any, spots: list[StudySpot]) -> None:
+        body = client.get("/spots").json()
+
+        assert body["pagination"]["total"] == len(RECORDS)
+
+    def test_it_combines_with_the_other_filters(self, client: Any, spots: list[StudySpot]) -> None:
+        body = client.get("/spots", {"indoor_seating": "true", "borough": "Brooklyn"}).json()
+
+        # Café Grumpy is the only spot with a recorded yes and it is in
+        # Manhattan, so the two filters together match nothing.
+        assert body["items"] == []
+
+    def test_the_search_endpoint_takes_it_too(self, client: Any, spots: list[StudySpot]) -> None:
+        # All three endpoints have to accept the same filters, or a search
+        # silently widens when a filter the listing honours is dropped.
+        body = client.get("/spots/search", {"q": "coffee", "indoor_seating": "false"}).json()
+
+        assert [item["id"] for item in body["items"]] == ["dohmh:hundred"]
+
+    def test_the_facet_counts_the_recorded_yes_rather_than_the_not_no(
+        self, client: Any, spots: list[StudySpot]
+    ) -> None:
+        body = client.get("/spots/facets").json()
+
+        # One of five, not four of five. The number tells a reader whether the
+        # checkbox is worth ticking, so padding it with the unrecorded majority
+        # would make it a guess.
+        assert body["indoor_seating"] == 1
+
+    def test_the_facet_narrows_under_the_other_filters(
+        self, client: Any, spots: list[StudySpot]
+    ) -> None:
+        body = client.get("/spots/facets", {"borough": "Brooklyn"}).json()
+
+        assert body["indoor_seating"] == 0
+
+    def test_a_value_that_is_not_a_boolean_is_rejected(
+        self, client: Any, spots: list[StudySpot]
+    ) -> None:
+        # 422 rather than 400: this API answers a well-formed request carrying
+        # an unusable value with Unprocessable Entity, which every other filter
+        # test here relies on too.
+        assert client.get("/spots", {"indoor_seating": "sometimes"}).status_code == 422

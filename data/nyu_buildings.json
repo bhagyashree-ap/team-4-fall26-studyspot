@@ -17,7 +17,10 @@
     "subway_metres": null,
     "subway_step_free": null,
     "nearby_spots": 0,
-    "outdoor_seating": false
+    "outdoor_seating": false,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
   },
   {
     "id": "nyu:kimmel-center",
@@ -37,7 +40,10 @@
     "subway_metres": null,
     "subway_step_free": null,
     "nearby_spots": 0,
-    "outdoor_seating": false
+    "outdoor_seating": false,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
   },
   {
     "id": "nyu:courant-institute",
@@ -57,7 +63,10 @@
     "subway_metres": null,
     "subway_step_free": null,
     "nearby_spots": 0,
-    "outdoor_seating": false
+    "outdoor_seating": false,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
   },
   {
     "id": "nyu:stern-tisch-hall",
@@ -77,7 +86,10 @@
     "subway_metres": null,
     "subway_step_free": null,
     "nearby_spots": 0,
-    "outdoor_seating": false
+    "outdoor_seating": false,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
   },
   {
     "id": "nyu:silver-center",
@@ -97,7 +109,10 @@
     "subway_metres": null,
     "subway_step_free": null,
     "nearby_spots": 0,
-    "outdoor_seating": false
+    "outdoor_seating": false,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
   },
   {
     "id": "nyu:tandon-dibner-library",
@@ -117,7 +132,10 @@
     "subway_metres": null,
     "subway_step_free": null,
     "nearby_spots": 0,
-    "outdoor_seating": false
+    "outdoor_seating": false,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
   },
   {
     "id": "nyu:tandon-rogers-hall",
@@ -137,7 +155,10 @@
     "subway_metres": null,
     "subway_step_free": null,
     "nearby_spots": 0,
-    "outdoor_seating": false
+    "outdoor_seating": false,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
   },
   {
     "id": "nyu:global-center",
@@ -157,7 +178,10 @@
     "subway_metres": null,
     "subway_step_free": null,
     "nearby_spots": 0,
-    "outdoor_seating": false
+    "outdoor_seating": false,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
   },
   {
     "id": "nyu:60-fifth-avenue",
@@ -177,7 +201,10 @@
     "subway_metres": null,
     "subway_step_free": null,
     "nearby_spots": 0,
-    "outdoor_seating": false
+    "outdoor_seating": false,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
   },
   {
     "id": "nyu:paulson-center",
@@ -197,6 +224,9 @@
     "subway_metres": null,
     "subway_step_free": null,
     "nearby_spots": 0,
-    "outdoor_seating": false
+    "outdoor_seating": false,
+    "indoor_seating": null,
+    "venue_wifi": null,
+    "opening_hours": null
   }
 ]

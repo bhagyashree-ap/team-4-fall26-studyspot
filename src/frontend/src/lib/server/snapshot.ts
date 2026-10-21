@@ -51,7 +51,7 @@ let cached: StudySpot[] | null = null;
 
 /** Every spot in the committed snapshot. */
 export function allSpots(): StudySpot[] {
-	// Read once: prerendering 1,916 pages would otherwise parse it 1,916 times.
+	// Read once: prerendering 3,772 pages would otherwise parse it 3,772 times.
 	if (cached === null) {
 		cached = JSON.parse(readFileSync(findSnapshot(), 'utf-8')) as StudySpot[];
 	}

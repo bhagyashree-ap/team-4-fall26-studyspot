@@ -31,6 +31,9 @@ function spot(overrides: Partial<StudySpot> = {}): StudySpot {
 		subway_step_free: null,
 		nearby_spots: 0,
 		outdoor_seating: false,
+		indoor_seating: null,
+		venue_wifi: null,
+		opening_hours: null,
 		...overrides
 	};
 }
