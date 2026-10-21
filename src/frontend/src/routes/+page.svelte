@@ -78,9 +78,11 @@
 	 * How long to wait after a keystroke before searching.
 	 *
 	 * Long enough that an ordinary word is one request rather than five, short
-	 * enough to feel like the results are following the typing. The ranking
-	 * itself needs no help: `search.py` already scores a prefix at 0.95, so
-	 * `bob` finds Bobst Library without anything being submitted.
+	 * enough to feel like the results are following the typing.
+	 *
+	 * The matching is what makes a half-typed word worth sending at all:
+	 * `search.py` treats the last word as a prefix, so `bob` reaches Bobst
+	 * Library. Before that it reached "The Cafe at Bob" and nothing else.
 	 */
 	const TYPING_DELAY_MS = 250;
 
@@ -178,9 +180,14 @@
 		runNow();
 	}
 
-	function handleFilters(next: SpotFilters): void {
+	function handleFilters(next: SpotFilters, typing = false): void {
 		filters = next;
-		runNow();
+
+		// A select or a checkbox is a decision and lands at once. The campus
+		// box is typed, so it waits the same beat the search box does --
+		// otherwise every letter of "New York University" is a request.
+		if (typing) runSoon();
+		else runNow();
 	}
 
 	async function handleShowMore(): Promise<void> {

@@ -338,3 +338,93 @@ class TestCost:
 
         free = client.get("/spots?no_purchase_needed=true").json()
         assert "facdb:newkind" not in {spot["id"] for spot in free["items"]}
+
+
+#: Campuses whose names contain one another, which is the case a plain
+#: substring match gets wrong. Both are real values from the snapshot.
+CAMPUS_RECORDS: list[dict[str, Any]] = [
+    {
+        "id": "campus:nyu",
+        "name": "A Place At NYU",
+        "category": "university_building",
+        "borough": "Manhattan",
+        "latitude": 40.7295,
+        "longitude": -73.9973,
+        "university": "New York University",
+    },
+    {
+        "id": "campus:liu",
+        "name": "A Place At LIU",
+        "category": "cafe",
+        "borough": "Brooklyn",
+        "latitude": 40.6917,
+        "longitude": -73.9822,
+        "university": "LIU-New York University Campus",
+    },
+    {
+        "id": "campus:none",
+        "name": "A Place Near Nothing",
+        "category": "cafe",
+        "borough": "Queens",
+        "latitude": 40.7282,
+        "longitude": -73.7949,
+        "university": None,
+    },
+]
+
+
+class TestTheCampusFilter:
+    """The one filter a reader types instead of picking.
+
+    Exact matching alone answered a half-typed campus with zero results, which
+    reads as "there are none" rather than "keep typing".
+    """
+
+    @pytest.fixture
+    def campuses(self, db: None) -> list[StudySpot]:
+        return StudySpot.objects.bulk_create(StudySpot(**record) for record in CAMPUS_RECORDS)
+
+    def ids(self, client: Any, value: str) -> list[str]:
+        body = client.get("/spots", {"university": value}).json()
+        return sorted(spot["id"] for spot in body["items"])
+
+    def test_a_whole_name_means_that_campus_alone(
+        self, client: Any, campuses: list[StudySpot]
+    ) -> None:
+        # The case a plain `icontains` gets wrong: "New York University" is a
+        # substring of "LIU-New York University Campus", so a reader who picked
+        # the first from the list would have been given both.
+        assert self.ids(client, "New York University") == ["campus:nyu"]
+
+    def test_a_whole_name_is_still_case_insensitive(
+        self, client: Any, campuses: list[StudySpot]
+    ) -> None:
+        assert self.ids(client, "new york university") == ["campus:nyu"]
+
+    def test_a_partial_name_narrows_instead_of_returning_nothing(
+        self, client: Any, campuses: list[StudySpot]
+    ) -> None:
+        # Previously zero, which is indistinguishable from having no data.
+        assert self.ids(client, "New York") == ["campus:liu", "campus:nyu"]
+
+    def test_a_fragment_of_one_name_finds_only_it(
+        self, client: Any, campuses: list[StudySpot]
+    ) -> None:
+        assert self.ids(client, "LIU") == ["campus:liu"]
+
+    def test_an_initialism_finds_what_it_stands_for(
+        self, client: Any, campuses: list[StudySpot]
+    ) -> None:
+        # "NYU" is a substring of nothing, so only the expansion reaches it.
+        assert self.ids(client, "NYU") == ["campus:nyu"]
+
+    def test_a_campus_nobody_has_still_matches_nothing(
+        self, client: Any, campuses: list[StudySpot]
+    ) -> None:
+        assert self.ids(client, "Hogwarts") == []
+
+    def test_rows_without_a_campus_are_never_included(
+        self, client: Any, campuses: list[StudySpot]
+    ) -> None:
+        # Documented behaviour: filtering on the column excludes NULLs.
+        assert "campus:none" not in self.ids(client, "New York")

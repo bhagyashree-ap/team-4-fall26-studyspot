@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from django.db.models import Count, QuerySet
+from django.db.models import Count, Q, QuerySet
 from rest_framework.exceptions import NotFound
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import StudySpot
-from .search import search
+from .search import expanded_words, search
 from .serializers import (
     SpotFacetsQuerySerializer,
     SpotQuerySerializer,
@@ -20,18 +20,59 @@ from .serializers import (
 )
 
 #: Maps a validated query parameter to the lookup it filters with. Substring for
-#: the name, exact for the rest, all case-insensitive. A `university` or
-#: `neighborhood` filter therefore excludes rows where the column is NULL, which
-#: is the documented behaviour.
+#: the name, exact for the rest, all case-insensitive. A `neighborhood` filter
+#: therefore excludes rows where the column is NULL, which is the documented
+#: behaviour.
+#:
+#: `university` is not here: it is the one filter a reader types instead of
+#: picking, so :func:`campus` decides its lookup per value.
 LOOKUPS = {
     "name": "name__icontains",
     "category": "category__iexact",
     "neighborhood": "neighborhood__iexact",
     "borough": "borough__iexact",
-    "university": "university__iexact",
     "free_public_wifi": "free_public_wifi",
     "no_purchase_needed": "no_purchase_needed",
 }
+
+
+def campus(value: str) -> Q:
+    """How to match ``value`` against the campus column.
+
+    The field is a text box with a 126-entry datalist behind it, so a reader
+    can pick a whole name or type part of one, and the two need different
+    lookups. Exact matching alone answered a half-typed name with zero
+    results, which reads as "there are none" rather than "keep typing":
+
+        New York University  ->  11
+        New York             ->   0
+        NYU                  ->   0
+
+    So: exact when the value names a campus, substring when it does not. That
+    way picking "New York University" from the list still means that campus
+    alone, and does not quietly also return the spots near
+    "LIU-New York University Campus", which a plain substring match would.
+
+    The initialism table from search gets a turn too, because "NYU" is what
+    people type and it is a substring of nothing.
+
+    Checked against every row rather than against the rows the other filters
+    left, so that what "New York University" means does not depend on whether
+    a borough was also chosen.
+    """
+    candidates = [value]
+    expanded = " ".join(expanded_words(value))
+    if expanded.casefold() != value.casefold():
+        candidates.append(expanded)
+
+    for candidate in candidates:
+        if StudySpot.objects.filter(university__iexact=candidate).exists():
+            return Q(university__iexact=candidate)
+
+    partial = Q()
+    for candidate in candidates:
+        partial |= Q(university__icontains=candidate)
+    return partial
 
 
 def apply_filters(queryset: QuerySet[StudySpot], parameters: dict[str, Any]) -> QuerySet[StudySpot]:
@@ -45,7 +86,10 @@ def apply_filters(queryset: QuerySet[StudySpot], parameters: dict[str, Any]) -> 
         for parameter, lookup in LOOKUPS.items()
         if parameters.get(parameter) is not None
     }
-    return queryset.filter(**lookups) if lookups else queryset
+    narrowed = queryset.filter(**lookups) if lookups else queryset
+
+    university = parameters.get("university")
+    return narrowed.filter(campus(university)) if university is not None else narrowed
 
 
 class SpotListView(APIView):

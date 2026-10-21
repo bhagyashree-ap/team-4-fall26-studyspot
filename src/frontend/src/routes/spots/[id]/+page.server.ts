@@ -18,5 +18,9 @@ export const load: PageServerLoad = ({ params }) => {
 		throw error(404, `No study spot has the identifier ${params.id}`);
 	}
 
-	return { spot, nearby: nearbySpots(spot) };
+	// Twelve rather than four: the page shows four and keeps the rest behind a
+	// disclosure. The median spot has 39 neighbours inside 800 m and the busiest
+	// has 178, so this is a cap, not a complete list -- and it is a cap on bytes
+	// written into 1,915 prerendered pages as much as on what a reader can use.
+	return { spot, nearby: nearbySpots(spot, 12) };
 };

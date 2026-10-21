@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 
+	import { showsCampus } from './campus';
 	import { mapsUrl } from './maps';
 	import { orderByTrunk, routeColour, routeTextColour, walkMinutes } from './subway';
 	import type { StudySpot } from './contract';
@@ -135,7 +136,7 @@
 					</p>
 				{/if}
 
-				{#if spot.university}
+				{#if showsCampus(spot)}
 					<!-- Proximity, never affiliation: see the contract. -->
 					<p class="campus">Near {spot.university}</p>
 				{/if}
@@ -240,25 +241,52 @@
 		list-style: none;
 	}
 
+	/*
+		`position: relative` is what lets the title's stretched ::after cover
+		the card. Everything below depends on it.
+	*/
 	li {
+		position: relative;
 		display: flex;
 		flex-direction: column;
 		padding: 20px;
 		border: 1px solid var(--color-border);
 		border-radius: 18px;
 		background: white;
+		transition:
+			border-color 160ms ease,
+			box-shadow 160ms ease,
+			transform 160ms ease;
 	}
 
-	h3 a:hover {
+	/*
+		A ring rather than a drop shadow: `0 0 0 3px` spreads with no offset and
+		no blur beneath the card, so the card is outlined, not elevated on a
+		smudge. The lift is the only thing that moves.
+	*/
+	li:hover,
+	li:has(a:focus-visible) {
+		border-color: var(--color-brand);
+		box-shadow: 0 0 0 3px rgb(255 56 92 / 0.18);
+		transform: translateY(-2px);
+	}
+
+	/*
+		The whole card opens the detail page, but the <a> stays wrapped around
+		the title only: an anchor may not contain a button, and the Share
+		button is one. So the title's ::after is stretched over the card
+		instead, which keeps one real link per card -- focusable, openable in a
+		new tab, and announced by its name rather than by "card".
+	*/
+	h3 a::after {
+		position: absolute;
+		border-radius: 18px;
+		content: '';
+		inset: 0;
+	}
+
+	li:hover h3 a {
 		text-decoration: underline;
-	}
-
-	h3 {
-		margin: 0 0 8px;
-		font-size: 17px;
-		font-weight: 700;
-		letter-spacing: -0.02em;
-		line-height: 1.3;
 	}
 
 	.meta {
@@ -348,6 +376,8 @@
 		two lines is enough to break the line-up.
 	*/
 	.actions {
+		position: relative;
+		z-index: 1;
 		display: flex;
 		gap: 10px;
 		margin: 18px 0 0;

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 	import type { StudySpot } from '$lib/contract';
+	import { showsCampus } from '$lib/campus';
 	import { mapsUrl } from '$lib/maps';
 	import { orderByTrunk, routeColour, routeTextColour, STEP_FREE, walkMinutes } from '$lib/subway';
 	import type { Nearby } from '$lib/server/snapshot';
@@ -27,10 +28,24 @@
 		return metres < 100 ? `${Math.round(metres / 10) * 10} m` : `${Math.round(metres / 50) * 50} m`;
 	}
 
+	/** Shown at once; the rest sit behind the disclosure. */
+	const SHOWN = 4;
+
 	// The same target the result cards use: a hyperlink that opens the viewer's
 	// own maps app, where walking and subway directions are one tap away.
 	const directions = $derived(mapsUrl(spot));
 </script>
+
+{#snippet option(entry: Nearby)}
+	<li>
+		<a href={resolve(`/spots/${entry.spot.id}` as '/')}>
+			<span class="name">{entry.spot.name}</span>
+			<span class="meta">
+				{readableCategory(entry.spot.category)} · {walkingDistance(entry.metres)} away
+			</span>
+		</a>
+	</li>
+{/snippet}
 
 <svelte:head>
 	<title>{spot.name} — StudySpot</title>
@@ -81,7 +96,7 @@
 					<dd>{spot.operator}</dd>
 				{/if}
 
-				{#if spot.university}
+				{#if showsCampus(spot)}
 					<dt>Nearest campus</dt>
 					<!--
 						Proximity and never affiliation. Spelled out here rather than
@@ -107,22 +122,6 @@
 						<span class="note">— {STEP_FREE[spot.subway_step_free ?? 'none']}</span>
 					</dd>
 				{/if}
-
-				<dt>Options nearby</dt>
-				<dd>
-					{#if spot.nearby_spots === 0}
-						Nothing else within a five-minute walk.
-						<span class="note">If it is full, the next place is a longer trip.</span>
-					{:else}
-						{spot.nearby_spots}
-						other study {spot.nearby_spots === 1 ? 'spot' : 'spots'} within a five-minute walk.
-						<!--
-							Places, not people. The card's Quiet/Moderate/Busy reads off
-							this same number; here it is the number itself, because a
-							detail page is where someone decides whether to make the trip.
-						-->
-					{/if}
-				</dd>
 
 				<dt>Cost</dt>
 				<dd>
@@ -163,18 +162,28 @@
 		{#if data.nearby.length > 0}
 			<section aria-labelledby="nearby-title">
 				<h2 id="nearby-title">Also within a short walk</h2>
+
 				<ul>
-					{#each data.nearby as entry (entry.spot.id)}
-						<li>
-							<a href={resolve(`/spots/${entry.spot.id}` as '/')}>
-								<span class="name">{entry.spot.name}</span>
-								<span class="meta">
-									{readableCategory(entry.spot.category)} · {walkingDistance(entry.metres)} away
-								</span>
-							</a>
-						</li>
+					{#each data.nearby.slice(0, SHOWN) as entry (entry.spot.id)}
+						{@render option(entry)}
 					{/each}
 				</ul>
+
+				{#if data.nearby.length > SHOWN}
+					<!--
+						A native <details>, not a scripted toggle. These pages are
+						prerendered and ship no behaviour of their own, so this opens
+						for a reader whose JavaScript never arrives.
+					-->
+					<details>
+						<summary>See {data.nearby.length - SHOWN} more options nearby</summary>
+						<ul>
+							{#each data.nearby.slice(SHOWN) as entry (entry.spot.id)}
+								{@render option(entry)}
+							{/each}
+						</ul>
+					</details>
+				{/if}
 			</section>
 		{/if}
 	</main>
@@ -383,6 +392,45 @@
 	.meta {
 		color: var(--color-muted);
 		font-size: 13px;
+	}
+
+	details {
+		margin-top: 10px;
+	}
+
+	summary {
+		display: inline-flex;
+		min-height: 44px;
+		align-items: center;
+		color: var(--color-muted);
+		cursor: pointer;
+		font-size: 14px;
+		font-weight: 600;
+		list-style: none;
+	}
+
+	/* Safari still draws its own marker through `list-style: none`. */
+	summary::-webkit-details-marker {
+		display: none;
+	}
+
+	summary::after {
+		margin-left: 7px;
+		content: '▾';
+		font-size: 11px;
+		transition: transform 160ms ease;
+	}
+
+	details[open] summary::after {
+		transform: rotate(180deg);
+	}
+
+	summary:hover {
+		color: var(--color-text);
+	}
+
+	details ul {
+		margin-top: 10px;
 	}
 
 	@media (max-width: 560px) {

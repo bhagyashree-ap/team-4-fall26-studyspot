@@ -14,7 +14,7 @@ from typing import Any
 import pytest
 
 from spots.models import StudySpot
-from spots.search import INITIALISMS, THRESHOLD, expand, precise, search
+from spots.search import INITIALISMS, THRESHOLD, expand, is_plain, partial, precise, search
 
 pytestmark = pytest.mark.django_db
 
@@ -138,7 +138,7 @@ class TestShortenedNames:
     def test_an_initialism_is_expanded(self, spots: list[StudySpot]) -> None:
         # No fuzzy algorithm connects NYPL to its expansion: they share almost
         # no trigrams. The lookup is why this works.
-        assert expand("NYPL") == "New York Public Library"
+        assert expand("NYPL") == '"New York Public Library"'
         assert expand("nypl") == expand("NYPL")
 
     def test_an_unknown_word_is_left_alone(self) -> None:
@@ -149,7 +149,7 @@ class TestShortenedNames:
         # single trigram comparison replacing one word of several changed what
         # the rest was measured against. Full text matches word by word, so it
         # can now mean what it says.
-        assert expand("nyu library") == "New York University library"
+        assert expand("nyu library") == '"New York University" library'
 
     def test_an_initialism_finds_what_it_stands_for(self, spots: list[StudySpot]) -> None:
         assert "Elmer Holmes Bobst Library" in names("nyu library")
@@ -385,7 +385,7 @@ class TestAnExpansionThatMatchesNothing:
     """
 
     def test_the_expansion_itself_finds_nothing(self, spots: list[StudySpot]) -> None:
-        assert expand("cuny") == "City University of New York"
+        assert expand("cuny") == '"City University of New York"'
         assert precise("City University of New York", StudySpot.objects.all()).count() == 0
 
     def test_the_literal_term_finds_the_campus(self, spots: list[StudySpot]) -> None:
@@ -394,7 +394,7 @@ class TestAnExpansionThatMatchesNothing:
     def test_an_expansion_that_does_match_is_still_preferred(self, spots: list[StudySpot]) -> None:
         # NYU is the case the expansion exists for: no record is named "NYU",
         # and two carry "New York University" as their campus.
-        assert expand("nyu") == "New York University"
+        assert expand("nyu") == '"New York University"'
         assert set(names("nyu")) == {
             "Elmer Holmes Bobst Library",
             "Kimmel Center for University Life",
@@ -418,9 +418,120 @@ class TestTheOperatorIsSearchable:
     def test_its_initialism_does_too(self, spots: list[StudySpot]) -> None:
         # The expansion exists precisely because NYPL and its words share
         # almost no trigrams.
-        assert expand("nypl") == "New York Public Library"
+        assert expand("nypl") == '"New York Public Library"'
         assert "53rd Street Library" in names("nypl")
 
     def test_a_branch_that_names_no_system_is_not_dragged_in(self, spots: list[StudySpot]) -> None:
         # Baychester has no operator in the fixture.
         assert "Baychester Library" not in names("nypl")
+
+
+class TestTypingAWordOut:
+    """Search as you type.
+
+    Postgres full text matches whole lexemes, so every keystroke before the
+    last one used to find nothing and fall through to trigrams. Typing towards
+    "Bobst" returned "The Cafe at Bob" -- confidently, and wrongly -- until the
+    final letter landed.
+    """
+
+    @pytest.mark.parametrize("fragment", ["bob", "bobs", "bobst"])
+    def test_a_fragment_reaches_the_name_it_starts(
+        self, spots: list[StudySpot], fragment: str
+    ) -> None:
+        names = [spot.name for spot in search(fragment)]
+        assert "Elmer Holmes Bobst Library" in names
+
+    def test_a_fragment_of_a_later_word_works_too(self, spots: list[StudySpot]) -> None:
+        # The distinctive word is third in the title, which is the case a
+        # `startswith` on the name alone would miss.
+        assert "Elmer Holmes Bobst Library" in [spot.name for spot in search("holm")]
+
+    def test_every_word_has_to_match_something(self, spots: list[StudySpot]) -> None:
+        # Prefixes are ANDed, exactly as whole words are, so a fragment that
+        # belongs to no row still narrows rather than widens. Asserted on the
+        # pass itself: `search` would go on to the trigram fallback, which is
+        # designed to rescue exactly this and would mask the question.
+        assert list(partial("bobst zzzz", StudySpot.objects.all())) == []
+
+    def test_nonsense_still_returns_nothing(self, spots: list[StudySpot]) -> None:
+        assert list(search("qqqq")) == []
+
+    def test_a_complete_word_still_finds_everything_it_did(self, spots: list[StudySpot]) -> None:
+        # The prefix form is a superset, so nothing that matched before stops
+        # matching. It is a superset and not an equal: "library" now also
+        # reaches a row whose word is "Libraries", which is the behaviour this
+        # pass exists for.
+        exact = {spot.name for spot in precise("library", StudySpot.objects.all())}
+        assert exact <= {spot.name for spot in search("library")}
+
+    def test_a_longer_word_is_reached_by_its_opening(self, spots: list[StudySpot]) -> None:
+        # The real snapshot has "New York University Libraries"; this fixture
+        # has none, so the same property is checked on a word it does have.
+        assert "Elmer Holmes Bobst Library" in [spot.name for spot in search("librar")]
+
+    @pytest.mark.parametrize("query", ['"Square Washington"', "washington -square", "a or b"])
+    def test_an_operator_turns_this_pass_off(self, spots: list[StudySpot], query: str) -> None:
+        # Quotes and `-` are intent, not noise. Prefixing their words would
+        # silently answer a different question -- a quoted phrase asks for an
+        # order, and ANDed prefixes have none.
+        assert not is_plain(query)
+
+    def test_punctuation_alone_matches_nothing(self, spots: list[StudySpot]) -> None:
+        # No words means no tsquery to build, and a raw one built from an empty
+        # string is a syntax error rather than an empty result.
+        assert list(partial("...", StudySpot.objects.all())) == []
+
+
+#: A library that is not NYU but holds every word of its name, scattered.
+#:
+#: This is the real shape of the bug: "New York" comes from the operator, and
+#: "University" from the neighborhood, and neither has anything to do with the
+#: other. 125th Street Library and Francis Martin Library both look like this.
+DECOY = {
+    "id": "facdb:decoy",
+    "name": "Francis Martin Library",
+    "category": "public_library",
+    "no_purchase_needed": True,
+    "operator": "New York Public Library",
+    "address": "2150 University Avenue, Bronx, NY 10453",
+    "neighborhood": "University Heights (South)-Morris Heights",
+    "borough": "Bronx",
+    "latitude": 40.8527,
+    "longitude": -73.9101,
+    "university": "Bronx Community College",
+}
+
+
+class TestAnInitialismExpandsToAPhrase:
+    """Why the expansion is quoted.
+
+    The vector spans four fields and full text ANDs bare words across all of
+    them, so `new & york & university` matched any row holding "New" and
+    "York" in one field and "University" in another. On the real snapshot
+    typing NYU returned 21 spots and nine were other universities entirely.
+    """
+
+    @pytest.fixture
+    def with_decoy(self, spots: list[StudySpot]) -> StudySpot:
+        return StudySpot.objects.create(**DECOY)
+
+    def test_the_expansion_is_a_phrase(self) -> None:
+        assert expand("nyu") == '"New York University"'
+
+    def test_a_word_that_is_not_an_initialism_is_not_quoted(self) -> None:
+        # Quoting everything would make each word a one-word phrase, which is
+        # harmless but says something the code does not mean.
+        assert expand("library") == "library"
+
+    def test_the_decoy_really_does_hold_every_word(self, with_decoy: StudySpot) -> None:
+        # Guards the guard: if this stopped being true the test below would
+        # pass for the wrong reason.
+        haystack = f"{with_decoy.operator} {with_decoy.address} {with_decoy.neighborhood}".lower()
+        assert all(word in haystack for word in ("new", "york", "university"))
+
+    def test_it_is_not_returned_for_the_initialism(self, with_decoy: StudySpot) -> None:
+        assert "Francis Martin Library" not in names("nyu")
+
+    def test_the_places_that_are_nyu_still_are(self, with_decoy: StudySpot) -> None:
+        assert "Elmer Holmes Bobst Library" in names("nyu")

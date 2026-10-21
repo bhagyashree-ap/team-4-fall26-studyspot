@@ -4,7 +4,8 @@
 	type Props = {
 		facets: Facets | null;
 		filters: SpotFilters;
-		onChange: (filters: SpotFilters) => void;
+		/** `typing` when the change came keystroke by keystroke, not from a pick. */
+		onChange: (filters: SpotFilters, typing?: boolean) => void;
 	};
 
 	let { facets, filters, onChange }: Props = $props();
@@ -22,7 +23,7 @@
 		return words.charAt(0).toUpperCase() + words.slice(1);
 	}
 
-	function set(change: Partial<SpotFilters>): void {
+	function set(change: Partial<SpotFilters>, typing = false): void {
 		const next = { ...filters, ...change };
 
 		// An empty select or a cleared input means "no filter". Sent as an empty
@@ -31,105 +32,104 @@
 			if (next[key] === undefined || next[key] === '') delete next[key];
 		}
 
-		onChange(next);
+		onChange(next, typing);
 	}
 </script>
 
 <div class="filters" role="group" aria-label="Filter results">
-	<div class="field-row">
-		<label class="field">
-			<span>Borough</span>
-			<select
-				id="borough-filter"
-				value={filters.borough ?? ''}
-				onchange={(event) => set({ borough: event.currentTarget.value })}
-			>
-				<option value="">Any</option>
-				{#each facets?.boroughs ?? [] as facet (facet.value)}
-					<option value={facet.value}>{facet.value} ({facet.count})</option>
-				{/each}
-			</select>
-		</label>
+	<label>
+		<span>Borough</span>
+		<select
+			value={filters.borough ?? ''}
+			onchange={(event) => set({ borough: event.currentTarget.value })}
+		>
+			<option value="">Any</option>
+			{#each facets?.boroughs ?? [] as facet (facet.value)}
+				<option value={facet.value}>{facet.value} ({facet.count})</option>
+			{/each}
+		</select>
+	</label>
 
-		<label class="field">
-			<span>Type</span>
-			<select
-				value={filters.category ?? ''}
-				onchange={(event) => set({ category: event.currentTarget.value })}
-			>
-				<option value="">Any</option>
-				{#each facets?.categories ?? [] as facet (facet.value)}
-					<option value={facet.value}>{readable(facet.value)} ({facet.count})</option>
-				{/each}
-			</select>
-		</label>
+	<label>
+		<span>Type</span>
+		<select
+			value={filters.category ?? ''}
+			onchange={(event) => set({ category: event.currentTarget.value })}
+		>
+			<option value="">Any</option>
+			{#each facets?.categories ?? [] as facet (facet.value)}
+				<option value={facet.value}>{readable(facet.value)} ({facet.count})</option>
+			{/each}
+		</select>
+	</label>
 
-		<label class="field">
-			<span>Campus</span>
-			<!--
-				A list rather than a select: there are 126 campuses, which is a
-				scroll in a dropdown and a type-ahead in a datalist.
-			-->
-			<input
-				id="campus-filter"
-				list="campus-options"
-				value={filters.university ?? ''}
-				placeholder="Any campus"
-				autocomplete="off"
-				onchange={(event) => set({ university: event.currentTarget.value })}
-			/>
-			<datalist id="campus-options">
-				{#each facets?.universities ?? [] as facet (facet.value)}
-					<option value={facet.value}>{facet.count}</option>
-				{/each}
-			</datalist>
-		</label>
-	</div>
+	<label>
+		<span>Campus</span>
+		<!--
+			A list rather than a select: there are 126 campuses, which is a
+			scroll in a dropdown and a type-ahead in a datalist.
 
-	<div class="toggle-row">
-		<label class="toggle wifi-toggle">
-			<input
-				type="checkbox"
-				checked={filters.free_public_wifi === true}
-				onchange={(event) => set({ free_public_wifi: event.currentTarget.checked || undefined })}
-			/>
-			<!--
-				"Free public Wi-Fi" rather than "has Wi-Fi": the data says a hotspot
-				the city publishes is within 25 m, which a campus building's
-				credentialled network is not.
+			Both handlers, and they mean different things. `oninput` is a
+			keystroke, so it is debounced like the search box; `onchange` is a
+			pick from the list or a blur, which should land at once. A partial
+			value narrows now rather than returning nothing, so typing is worth
+			following.
+		-->
+		<input
+			list="campus-options"
+			value={filters.university ?? ''}
+			placeholder="Any"
+			autocomplete="off"
+			oninput={(event) => set({ university: event.currentTarget.value }, true)}
+			onchange={(event) => set({ university: event.currentTarget.value })}
+		/>
+		<datalist id="campus-options">
+			{#each facets?.universities ?? [] as facet (facet.value)}
+				<option value={facet.value}>{facet.count}</option>
+			{/each}
+		</datalist>
+	</label>
 
-				The count is how many of the currently matching spots have it, so it
-				answers "is this worth ticking" before you tick it.
-			-->
-			<span>
-				Free public Wi-Fi
-				{#if facets}
-					<span class="count">({facets.free_public_wifi})</span>
-				{/if}
-			</span>
-			<span class="switch" aria-hidden="true"></span>
-		</label>
+	<label class="toggle">
+		<input
+			type="checkbox"
+			checked={filters.free_public_wifi === true}
+			onchange={(event) => set({ free_public_wifi: event.currentTarget.checked || undefined })}
+		/>
+		<!--
+			"Free public Wi-Fi" rather than "has Wi-Fi": the data says a hotspot
+			the city publishes is within 25 m, which a campus building's
+			credentialled network is not.
 
-		<label class="toggle purchase-toggle">
-			<input
-				type="checkbox"
-				checked={filters.no_purchase_needed === true}
-				onchange={(event) => set({ no_purchase_needed: event.currentTarget.checked || undefined })}
-			/>
-			<!--
-				The question a student actually asks, and not any one type: it is
-				true of every library and of the campus buildings, false only of
-				cafés. About money rather than entry.
-			-->
-			<span>
-				No purchase needed
-				{#if facets}
-					<span class="count">({facets.no_purchase_needed})</span>
-				{/if}
-			</span>
-			<span class="switch" aria-hidden="true"></span>
-		</label>
-	</div>
+			The count is how many of the currently matching spots have it, so it
+			answers "is this worth ticking" before you tick it.
+		-->
+		<span>
+			Free public Wi-Fi
+			{#if facets}
+				<span class="count">({facets.free_public_wifi})</span>
+			{/if}
+		</span>
+	</label>
+
+	<label class="toggle">
+		<input
+			type="checkbox"
+			checked={filters.no_purchase_needed === true}
+			onchange={(event) => set({ no_purchase_needed: event.currentTarget.checked || undefined })}
+		/>
+		<!--
+			The question a student actually asks, and not any one type: it is
+			true of every library and of the campus buildings, false only of
+			cafés. About money rather than entry.
+		-->
+		<span>
+			No purchase needed
+			{#if facets}
+				<span class="count">({facets.no_purchase_needed})</span>
+			{/if}
+		</span>
+	</label>
 
 	{#if active > 0}
 		<button type="button" onclick={() => onChange({})}>
