@@ -67,8 +67,11 @@
 	}
 
 	label span {
-		font-size: 12px;
+		color: #6a625d;
+		font-size: 11px;
 		font-weight: 700;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
 	}
 
 	input {
@@ -79,6 +82,7 @@
 		color: var(--color-muted);
 		background: transparent;
 		font-size: 14px;
+		line-height: 1.4;
 	}
 
 	button {
@@ -91,7 +95,7 @@
 		border-radius: 12px;
 		color: white;
 		background: var(--color-brand);
-		font-size: 15px;
+		font-size: 14px;
 		font-weight: 700;
 		cursor: pointer;
 		transition: background 160ms ease;
