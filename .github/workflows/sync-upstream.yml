@@ -35,7 +35,7 @@ jobs:
           target_sync_branch: develop
           target_repo_token: ${{ secrets.GITHUB_TOKEN }}
           upstream_sync_branch: develop
-          upstream_sync_repo: gcivil-nyu-org/team-4-fall26
+          upstream_sync_repo: https://github.com/gcivil-nyu-org/team-4-fall26
           test_mode: ${{ inputs.sync_test_mode || false }}
 
       - name: Report sync result
