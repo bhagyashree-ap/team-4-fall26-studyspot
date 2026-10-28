@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
 	import SearchBar from '$lib/SearchBar.svelte';
+	import SiteHeader from '$lib/SiteHeader.svelte';
 	import SpotResults from '$lib/SpotResults.svelte';
 	import SpotFiltersBar from '$lib/SpotFilters.svelte';
 	import { ApiError, DEFAULT_LIMIT, fetchFacets, listSpots, searchSpots } from '$lib/api';
@@ -231,26 +231,7 @@
 </svelte:head>
 
 <div class="page">
-	<header>
-		<a class="brand" href={resolve('/')} aria-label="StudySpot home">
-			<svg viewBox="0 0 32 32" aria-hidden="true">
-				<path d="M7 7.5h18v17H7z"></path>
-				<path d="M11 12h10M11 16h10M11 20h6"></path>
-			</svg>
-			<span>StudySpot</span>
-		</a>
-		<nav aria-label="Main navigation">
-			<a class="nav-link" href={resolve('/')}>Explore</a>
-			<!-- svelte-ignore a11y_invalid_attribute -->
-			<a class="nav-link" href="#">Map</a>
-			<!-- svelte-ignore a11y_invalid_attribute -->
-			<a class="nav-link" href="#">Saved</a>
-			<!-- svelte-ignore a11y_invalid_attribute -->
-			<a class="nav-link" href="#">Suggest a spot</a>
-			<!-- svelte-ignore a11y_invalid_attribute -->
-			<a class="sign-in" href="#">Sign in</a>
-		</nav>
-	</header>
+	<SiteHeader />
 
 	<main>
 		<section class="hero" class:compact={searched} aria-labelledby="hero-title">
@@ -295,81 +276,9 @@
 		padding: 0 24px 24px;
 	}
 
-	header,
 	main {
 		width: min(1180px, 100%);
 		margin: 0 auto;
-	}
-
-	header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		height: 76px;
-	}
-
-	.brand {
-		display: inline-flex;
-		align-items: center;
-		gap: 9px;
-		color: var(--color-brand-hover);
-		font-size: 20px;
-		font-weight: 750;
-		letter-spacing: -0.04em;
-	}
-
-	.brand svg {
-		width: 30px;
-		height: 30px;
-		fill: none;
-		stroke: currentColor;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-		stroke-width: 2;
-	}
-
-	nav {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-	}
-
-	.nav-link,
-	.sign-in {
-		display: inline-flex;
-		min-height: 44px;
-		align-items: center;
-		justify-content: center;
-		padding: 0 14px;
-		border: 1px solid #eee9e4;
-		border-radius: 999px;
-		font-size: 14px;
-		font-weight: 650;
-		line-height: 1.2;
-		background: #fff;
-		transition: background-color 150ms ease;
-	}
-
-	.nav-link:hover {
-		background: #f7f1eb;
-	}
-
-	.sign-in {
-		min-width: 88px;
-		margin-left: 4px;
-		border-color: #222;
-		color: #fff;
-		background: #222;
-	}
-
-	.sign-in:hover {
-		background: #3a3a3a;
-	}
-
-	.nav-link:focus-visible,
-	.sign-in:focus-visible {
-		outline: 3px solid var(--color-brand-hover);
-		outline-offset: 3px;
 	}
 
 	.hero {
@@ -495,27 +404,6 @@
 	@media (max-width: 560px) {
 		.page {
 			padding: 0 12px 15px;
-		}
-
-		header {
-			height: auto;
-			min-height: 68px;
-			flex-wrap: wrap;
-			gap: 6px;
-			padding: 10px 0;
-		}
-
-		nav {
-			width: 100%;
-			flex-wrap: wrap;
-			gap: 2px;
-		}
-
-		.nav-link,
-		.sign-in {
-			min-height: 40px;
-			padding: 0 10px;
-			font-size: 12px;
 		}
 
 		.hero {

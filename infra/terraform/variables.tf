@@ -277,6 +277,52 @@ variable "django_enable_admin" {
   default     = false
 }
 
+# -- Accounts ------------------------------------------------------------------
+
+variable "auth0_domain" {
+  description = <<-EOT
+    The Auth0 tenant's domain, such as studyspot.us.auth0.com. Blank leaves
+    accounts switched off, and the site hides its log-in controls.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "auth0_client_id" {
+  description = <<-EOT
+    Client ID of the Auth0 single-page application. Public by design: every
+    browser that logs in reads it.
+  EOT
+  type        = string
+  default     = ""
+}
+
+variable "auth0_audience" {
+  description = "Identifier of the Auth0 API that access tokens are issued for."
+  type        = string
+  default     = ""
+}
+
+variable "auth0_jwks" {
+  description = <<-EOT
+    The tenant's public signing keys: the JSON served at
+    https://<auth0_domain>/.well-known/jwks.json, verbatim.
+
+    The API function runs in private subnets with no NAT gateway (see
+    network.tf), so it cannot fetch these itself. They are public keys, not a
+    secret. Auth0 changes them only when someone rotates the signing key in the
+    dashboard; re-apply with the new document when that happens, or every log-in
+    is refused.
+  EOT
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.auth0_jwks == "" || can(jsondecode(var.auth0_jwks).keys)
+    error_message = "auth0_jwks must be the JSON document from /.well-known/jwks.json."
+  }
+}
+
 variable "api_reserved_concurrency" {
   description = <<-EOT
     Concurrent executions reserved for the API function.

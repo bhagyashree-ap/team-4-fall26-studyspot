@@ -51,7 +51,7 @@ The shared study-spot summary contract is intentionally small:
 
 `university` is proximity and never affiliation or a claim of access. `free_public_wifi` means the city publishes a free hotspot within 25 m; `false` means none is recorded rather than that there is no Wi-Fi, which is why a campus building with credentialled Wi-Fi reads as `false`. `operator` is who runs the place — for a branch, its library system, which nothing else in the record says. `no_purchase_needed` is true where sitting down costs nothing — every library and campus building, no café — and is about money rather than entry. `outdoor_seating` is true when a Dining Out NYC sidewalk licence matches the establishment's name *and* address; `false` means no licence matched rather than that there is nowhere to sit outside, and only cafés can carry it.
 
-Four routes are available alongside `GET /health/live`, none of them with a trailing slash:
+Six routes are available alongside `GET /health/live`, none of them with a trailing slash:
 
 | Route | Purpose |
 |---|---|
@@ -59,6 +59,8 @@ Four routes are available alongside `GET /health/live`, none of them with a trai
 | `GET /spots/search?q=` | Ranks instead of filtering, across name, campus, neighborhood and address; tolerates misspellings, expands initialisms, and accepts the same filters |
 | `GET /spots/facets` | The values the filter controls offer, with counts |
 | `GET /spots/{id}` | One spot |
+| `GET /auth/config` | Which Auth0 tenant the browser logs in with |
+| `GET /account`, `POST /account` | The logged-in person's account, and finishing sign-up |
 
 See the [HTTP API guide](docs/source/api.md).
 

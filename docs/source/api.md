@@ -11,6 +11,10 @@ No route has a trailing slash, and the application does not redirect one onto th
 | `GET /health/live` | Reports whether the API process can serve requests. It intentionally does not contact Postgres. |
 | `GET /spots` | Returns a filtered, paginated page of study spots. |
 | `GET /spots/{id}` | Returns one study spot. |
+| `GET /auth/config` | The public Auth0 settings the browser logs in with. See [Accounts](accounts.md). |
+| `GET /account` | The logged-in person's account. Needs a bearer token. |
+| `POST /account` | Finishes sign-up as a student or a business. Needs a bearer token. |
+| `GET /usernames/{username}` | Whether a username is free to choose. |
 
 `GET /health/live` returns:
 
@@ -155,12 +159,14 @@ Every non-2xx response uses one envelope:
 }
 ```
 
-`code` is stable and machine-readable; `message` is for people. `details` lists one entry per offending input and is empty when no single input is at fault.
+`code` is stable and machine-readable; `message` is for people. `details` lists one entry per offending input and is empty when no single input is at fault. A field from the query string is prefixed `query.`, and one from a JSON body `body.`.
 
 | Status | `code` | Raised when |
 |---|---|---|
+| 401 | `unauthorized` | An account route was called without a bearer token, or with one that does not verify. |
 | 404 | `not_found` | No spot has the requested identifier. |
 | 405 | `method_not_allowed` | The route exists but the method does not. |
+| 409 | `conflict` | Sign-up was already finished for this account. |
 | 422 | `validation_error` | A parameter is missing, malformed, out of range, or unrecognized. |
 | 500 | `internal_error` | An unhandled failure. The cause is logged, never returned. |
 | 503 | `database_unavailable` | Postgres could not answer the query, or has never been migrated. |

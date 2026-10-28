@@ -38,6 +38,7 @@ STATUS_CODES = {
     403: "forbidden",
     404: "not_found",
     405: "method_not_allowed",
+    409: "conflict",
     422: "validation_error",
     500: "internal_error",
     503: "service_unavailable",
@@ -99,6 +100,10 @@ def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | Non
     happen for anything that is not an API error.
     """
     if isinstance(exc, ValidationError):
+        # Where the offending value came from: the query string for a read,
+        # the JSON body for a write.
+        request = context.get("request")
+        source = "query" if request is None or request.method in {"GET", "HEAD"} else "body"
         # 422 rather than DRF's 400: the published contract says a request that
         # fails validation is Unprocessable Content, and the frontend
         # distinguishes it from a malformed request.
@@ -106,7 +111,7 @@ def exception_handler(exc: Exception, context: dict[str, Any]) -> Response | Non
             envelope(
                 "validation_error",
                 "The request could not be validated.",
-                flatten_details(exc.detail, prefix="query"),
+                flatten_details(exc.detail, prefix=source),
             ),
             status=http_status.HTTP_422_UNPROCESSABLE_ENTITY,
         )

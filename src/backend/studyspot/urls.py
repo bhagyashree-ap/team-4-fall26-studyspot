@@ -15,6 +15,7 @@ from .health import liveness
 urlpatterns = [
     path("health/live", liveness, name="liveness"),
     path("", include("spots.urls")),
+    path("", include("accounts.urls")),
 ]
 
 if settings.ENABLE_ADMIN:

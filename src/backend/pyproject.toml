@@ -18,6 +18,8 @@ dependencies = [
     # Serves the admin and DRF static files from the application itself, so the
     # Lambda function needs no second origin for them.
     "whitenoise>=6.11.0",
+    # Verifies Auth0 access tokens. The crypto extra brings RS256.
+    "pyjwt[crypto]>=2.10.1",
 ]
 
 [tool.ruff]
@@ -48,7 +50,7 @@ select = ["E4", "E7", "E9", "F", "I", "UP", "B", "SIM", "DJ"]
 #
 # Revisit when ty gains Django support. The alternative is mypy with
 # django-stubs, which would type-check the ORM properly rather than ignoring it.
-include = ["spots/**"]
+include = ["spots/**", "accounts/**"]
 
 [tool.ty.overrides.rules]
 unresolved-attribute = "ignore"
@@ -58,7 +60,7 @@ invalid-type-form = "ignore"
 # studyspot.settings_test supplies the debug and secret-key values the real
 # settings module requires, then defers to it. See its docstring.
 DJANGO_SETTINGS_MODULE = "studyspot.settings_test"
-testpaths = ["spots"]
+testpaths = ["spots", "accounts"]
 addopts = ["-ra", "--strict-markers"]
 
 [dependency-groups]

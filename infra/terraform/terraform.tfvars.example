@@ -18,6 +18,20 @@ region      = "us-east-2"
 # database_publicly_accessible = true
 # database_allowed_cidrs       = ["203.0.113.0/24"]
 
+# -- Accounts ------------------------------------------------------------------
+#
+# Leave these out and accounts stay switched off. docs/source/accounts.md walks
+# through creating the Auth0 tenant they come from. The keys are fetched once:
+#
+#     curl -s https://studyspot.us.auth0.com/.well-known/jwks.json
+#
+# auth0_domain    = "studyspot.us.auth0.com"
+# auth0_client_id = "..."
+# auth0_audience  = "https://api.studyspot.app"
+# auth0_jwks      = <<-EOT
+#   {"keys":[...]}
+# EOT
+
 # -- Production hardening ------------------------------------------------------
 #
 # environment              = "production"

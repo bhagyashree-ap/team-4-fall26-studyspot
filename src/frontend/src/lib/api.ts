@@ -7,7 +7,7 @@
  * to know a hostname.
  */
 
-import type { ErrorEnvelope, Facets, SpotFilters, SpotPage } from './contract';
+import type { ErrorDetail, ErrorEnvelope, Facets, SpotFilters, SpotPage } from './contract';
 
 /** Matches the API's own default page size, so the first page agrees. */
 export const DEFAULT_LIMIT = 20;
@@ -17,13 +17,16 @@ export const DEFAULT_LIMIT = 20;
  *
  * `code` carries the API's machine-readable code where there was one, so a
  * caller can distinguish a validation problem from the database being down
- * without parsing a message meant for a person.
+ * without parsing a message meant for a person. `details` carries the
+ * per-field problems a validation error names, so a form can show each one
+ * beside the control it is about.
  */
 export class ApiError extends Error {
 	constructor(
 		readonly code: string,
 		message: string,
-		readonly status: number
+		readonly status: number,
+		readonly details: ErrorDetail[] = []
 	) {
 		super(message);
 		this.name = 'ApiError';
@@ -31,7 +34,7 @@ export class ApiError extends Error {
 }
 
 /** Narrow an unknown body to the shared error envelope. */
-function isErrorEnvelope(body: unknown): body is ErrorEnvelope {
+export function isErrorEnvelope(body: unknown): body is ErrorEnvelope {
 	if (typeof body !== 'object' || body === null || !('error' in body)) return false;
 	const error = (body as { error: unknown }).error;
 	return typeof error === 'object' && error !== null && 'code' in error && 'message' in error;

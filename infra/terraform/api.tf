@@ -91,6 +91,15 @@ locals {
 
     DJANGO_ENABLE_ADMIN = tostring(var.django_enable_admin)
 
+    # Accounts. Blank leaves them switched off; see docs/source/accounts.md.
+    AUTH0_DOMAIN    = var.auth0_domain
+    AUTH0_CLIENT_ID = var.auth0_client_id
+    AUTH0_AUDIENCE  = var.auth0_audience
+
+    # The function has no route to the internet to fetch the signing keys from
+    # Auth0, so they travel with it.
+    AUTH0_JWKS = var.auth0_jwks
+
     PYTHONDONTWRITEBYTECODE = "1"
   }
 
