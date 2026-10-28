@@ -292,6 +292,11 @@ export class Session {
 		return { access, id };
 	}
 
+	/** Credentials for other account-backed API features. Public requests need none. */
+	communityCredentials(): Promise<Credentials> | null {
+		return this.status === 'signed-in' ? this.#credentials() : null;
+	}
+
 	async #loadAccount(fresh = false): Promise<void> {
 		try {
 			this.account = await fetchAccount(await this.#credentials(fresh), this.#fetcher);

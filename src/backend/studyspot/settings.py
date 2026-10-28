@@ -62,6 +62,8 @@ CSRF_TRUSTED_ORIGINS = [
     for origin in os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", "").split(",")
     if origin.strip()
 ]
+if DEBUG and "http://localhost:7500" not in CSRF_TRUSTED_ORIGINS:
+    CSRF_TRUSTED_ORIGINS.append("http://localhost:7500")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -75,6 +77,7 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     "rest_framework",
     "spots",
+    "communities",
     "accounts",
 ]
 

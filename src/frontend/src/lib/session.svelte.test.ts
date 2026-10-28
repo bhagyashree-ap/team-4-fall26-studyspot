@@ -95,6 +95,7 @@ describe('start', () => {
 		await session.start();
 
 		expect(session.status).toBe('disabled');
+		expect(session.communityCredentials()).toBeNull();
 		expect(log).toEqual([]);
 	});
 
@@ -114,6 +115,7 @@ describe('start', () => {
 
 		expect(session.status).toBe('signed-in');
 		expect(session.account).toEqual(ACCOUNT);
+		expect(await session.communityCredentials()).toEqual({ access: 'token', id: 'id-token' });
 	});
 
 	it('only starts once', async () => {

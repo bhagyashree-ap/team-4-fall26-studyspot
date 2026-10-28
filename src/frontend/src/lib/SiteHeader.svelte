@@ -21,6 +21,7 @@
 	</a>
 	<nav aria-label="Main navigation">
 		<a class="nav-link" href={resolve('/')}>Explore</a>
+		<a class="nav-link" href={resolve('/communities')}>Communities</a>
 		<!-- svelte-ignore a11y_invalid_attribute -->
 		<a class="nav-link" href="#">Map</a>
 		<!-- svelte-ignore a11y_invalid_attribute -->

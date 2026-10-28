@@ -4,7 +4,9 @@
 
 **Live at <https://d1ulyrfyi06kwp.cloudfront.net>**
 
-StudySpot is an open-source search demo for discovering cafés and other third places across New York City. The goal is to make finding a useful place feel immediate: search by a name, category, or neighborhood and get a small, consistent set of results derived from NYC Open Data and OpenStreetMap.
+StudySpot is an open-source app for discovering cafés and other third places across New York City. The goal is to make finding a useful place feel immediate: search by a name, category, or neighborhood and get a small, consistent set of results derived from NYC Open Data and OpenStreetMap.
+
+Public study communities are available at `/communities`. Anyone can create and join a group without signing in. Owners manage channels and members; members can share channel links, chat, search messages, and start private conversations. Guest ownership and membership are tied to the browser session.
 
 > [!IMPORTANT]
 > StudySpot is deployed and working. `data/spots.json` holds 2,422 real places — 2,158 cafés, 227 public library branches, 21 special libraries, and 16 academic libraries and NYU campus buildings — 429 of them with a free public Wi-Fi hotspot nearby, and 108 cafés with a sidewalk-dining licence. Every one is somewhere a person can go: the city's 126 campus records anchor the "near which campus" label but are not published as spots, because an institution's administrative point is not a room. Search runs entirely in Postgres: full text ranks across name, campus, neighborhood and address, with trigram similarity behind it for misspellings, and it searches as you type. Results filter by borough, type, campus, and Wi-Fi. A spot detail page is the notable gap.
@@ -68,13 +70,30 @@ Every spot also has its own page at `/spots/{id}`. All 3,772 are prerendered at 
 
 ## Development
 
-The simplest setup only requires Git and Docker Compose 2.23 or newer:
+### Native local run (macOS)
+
+Install Bun, Python 3.12, uv, just, and PostgreSQL 17. Start Postgres and set up the development database once:
+
+```shell
+brew services start postgresql@17
+PG_BIN="$(brew --prefix postgresql@17)/bin"
+"$PG_BIN/psql" postgres -c "CREATE ROLE studyspot LOGIN PASSWORD 'studyspot' CREATEDB;"
+"$PG_BIN/createdb" -O studyspot studyspot
+```
+
+From the repository root, run `just setup` and `just migrate`, then run `just dev-backend` and `just dev-frontend` in separate terminals. Open <http://localhost:7500/communities>. The development connection defaults to `postgresql://studyspot:studyspot@localhost:5432/studyspot`. No account is required for community creation or joining.
+
+To populate sample communities and channel conversations, run `cd src/backend && DJANGO_DEBUG=true uv run python manage.py seed_sample_communities`. Add `--guest-community ID` to include two private conversations for the sole active guest in a guest-owned community. The command is repeatable and only runs with `DJANGO_DEBUG=true`.
+
+The container alternative requires Git and Docker Compose 2.23 or newer:
 
 ```shell
 docker compose up --build --watch
 ```
 
 Open <http://localhost:7500>. Source changes are synchronized into the frontend and backend containers; dependency changes rebuild only the affected image.
+
+To try community writes before the account UI is integrated, run `docker compose exec backend uv run python manage.py createsuperuser`, sign in at <http://localhost:7501/admin/>, then visit <http://localhost:7500/communities>. The backend and frontend share the `localhost` session cookie. Public browsing needs no account.
 
 For a pinned toolchain, use [Nix](https://nixos.org/). You will still need a running Docker engine.
 

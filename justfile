@@ -62,9 +62,22 @@ dev-frontend:
 dev-backend:
     cd src/backend && uv run python manage.py runserver 127.0.0.1:7501
 
+# Run frontend + backend together without Docker (needs local Postgres on :5432).
+# Frontend → http://127.0.0.1:7500  Backend → http://127.0.0.1:7501
+dev-local:
+    #!/usr/bin/env bash
+    trap 'kill 0' SIGINT SIGTERM EXIT
+    (cd src/backend && uv run python manage.py runserver 127.0.0.1:7501) &
+    (cd src/frontend && bun run dev -- --host 127.0.0.1 --port 7500) &
+    wait
+
 # Start only Postgres, for working on the backend outside Compose.
 start-db:
     docker compose up --detach --wait postgres
+
+# Seed sample communities and conversations (idempotent, DEBUG only).
+seed:
+    cd src/backend && uv run python manage.py seed_sample_communities
 
 # Apply database migrations to the local database.
 migrate:

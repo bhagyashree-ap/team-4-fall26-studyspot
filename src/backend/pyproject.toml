@@ -56,11 +56,19 @@ include = ["spots/**", "accounts/**"]
 unresolved-attribute = "ignore"
 invalid-type-form = "ignore"
 
+[[tool.ty.overrides]]
+include = ["communities/**"]
+
+[tool.ty.overrides.rules]
+# Django adds model managers, foreign-key IDs and reverse relations dynamically.
+unresolved-attribute = "ignore"
+invalid-type-form = "ignore"
+
 [tool.pytest.ini_options]
 # studyspot.settings_test supplies the debug and secret-key values the real
 # settings module requires, then defers to it. See its docstring.
 DJANGO_SETTINGS_MODULE = "studyspot.settings_test"
-testpaths = ["spots", "accounts"]
+testpaths = ["spots", "accounts", "communities"]
 addopts = ["-ra", "--strict-markers"]
 
 [dependency-groups]

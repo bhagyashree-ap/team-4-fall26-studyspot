@@ -65,10 +65,10 @@ Auth0's free plan covers this project. Do this once per team; everyone shares th
 
    ```js
    exports.onExecutePostLogin = async (event, api) => {
-   	const namespace = 'https://studyspot.app/';
-   	api.accessToken.setCustomClaim(`${namespace}email`, event.user.email ?? '');
-   	api.accessToken.setCustomClaim(`${namespace}email_verified`, event.user.email_verified === true);
-   	api.accessToken.setCustomClaim(`${namespace}username`, event.user.username ?? '');
+     const namespace = 'https://studyspot.app/';
+     api.accessToken.setCustomClaim(`${namespace}email`, event.user.email ?? '');
+     api.accessToken.setCustomClaim(`${namespace}email_verified`, event.user.email_verified === true);
+     api.accessToken.setCustomClaim(`${namespace}username`, event.user.username ?? '');
    };
    ```
 

@@ -22,6 +22,7 @@ nix
 
 architecture
 api
+communities
 accounts
 data-and-search
 database
