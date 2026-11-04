@@ -44,15 +44,7 @@ Two things that are easy to get wrong on a credit-funded account:
 
 ## Prerequisites
 
-The AWS CLI and Terraform are pinned in `flake.nix` alongside the rest of the
-toolchain, so a Nix checkout already has them:
-
-```bash
-direnv reload          # or: nix develop
-aws --version && terraform version
-```
-
-Without Nix, note that Terraform left homebrew-core when its license changed:
+Install the AWS CLI and Terraform. On macOS with Homebrew:
 
 ```bash
 brew install awscli && brew tap hashicorp/tap && brew install hashicorp/tap/terraform

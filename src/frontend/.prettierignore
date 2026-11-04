@@ -10,3 +10,6 @@ bun.lockb
 build/
 node_modules/
 .vercel/
+
+# Generated from the Unicode emoji-test data file.
+src/lib/emoji/catalog.json

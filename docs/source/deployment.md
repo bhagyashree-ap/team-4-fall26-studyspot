@@ -14,7 +14,7 @@ StudySpot has one deployment target: AWS. The SvelteKit frontend is prerendered 
 Reviewers therefore read the diff and run the change locally rather than opening a preview URL. If the team later wants previews, that is a second CloudFront distribution and a second Terraform workspace, not a setting.
 ```
 
-GitHub Actions validates the repository, Compose topology, documentation, Nix flake, and Terraform configuration. It deploys nothing and holds no AWS credentials.
+GitHub Actions validates the repository, Compose topology, documentation, and Terraform configuration. It deploys nothing and holds no AWS credentials.
 
 ## Environments
 
@@ -35,7 +35,7 @@ Protect both long-lived branches with required checks, resolved conversations, a
 Configure GitHub manually:
 
 1. Protect `develop` and `main`.
-2. Require `Repository checks`, `Terraform`, `Container smoke test`, and `Nix flake`.
+2. Require `Repository checks`, `Terraform`, and `Container smoke test`.
 3. Require resolved conversations and linear history; disable force pushes and deletion.
 4. Use zero required approvals for a solo maintainer, or require approvals only when an independent reviewer is available.
 

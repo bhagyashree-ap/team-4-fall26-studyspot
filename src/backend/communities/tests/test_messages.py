@@ -1,5 +1,8 @@
 """Channel messages are scoped to current members and their authors."""
 
+from datetime import UTC, datetime, timedelta
+from unittest.mock import patch
+
 import pytest
 from django.contrib.auth import get_user_model
 from rest_framework.test import APIClient
@@ -7,10 +10,8 @@ from rest_framework.test import APIClient
 pytestmark = pytest.mark.django_db
 
 
-def test_guest_chat_reply_reaction_pin_search_and_moderation():
-    owner = APIClient()
-    created = owner.post("/communities", {"name": "Calculus"})
-    community_id = created.data["id"]
+def test_guest_chat_reply_reaction_pin_search_and_moderation(existing_guest_community):
+    owner, community_id = existing_guest_community
     channel_id = owner.get(f"/communities/{community_id}").data["channels"][0]["id"]
     base = f"/communities/{community_id}/channels/{channel_id}"
     visitor = APIClient()
@@ -76,3 +77,63 @@ def test_message_paging_channel_boundary_and_archiving():
     assert client.patch(f"{channels}/{general_id}", {"archived": True}).status_code == 200
     assert client.post(base, {"content": "Late"}).status_code == 403
     assert len(client.get(base).data["items"]) == 3
+
+
+def test_private_channel_visibility_and_read_only(existing_guest_community):
+    owner, cid = existing_guest_community
+    channels = f"/communities/{cid}/channels"
+    channel = owner.get(channels).data[0]["id"]
+    base = f"{channels}/{channel}"
+    member = APIClient()
+    member.post(f"/communities/{cid}/join")
+    owner.post(f"{base}/messages", {"content": "classified"})
+    owner.patch(base, {"private": True})
+    assert member.get(channels).data == []
+    assert member.get(f"{base}/messages").status_code == 404
+    assert member.get(f"/communities/{cid}/messages/search?q=classified").data["items"] == []
+    owner.patch(base, {"private": False, "read_only": True})
+    assert member.get(f"{base}/messages").status_code == 200
+    assert member.post(f"{base}/messages", {"content": "hello"}).status_code == 403
+
+
+def test_slowmode_survives_deleting_last_post(existing_guest_community):
+    owner, cid = existing_guest_community
+    channels = f"/communities/{cid}/channels"
+    base = f"{channels}/{owner.get(channels).data[0]['id']}"
+    member = APIClient()
+    member.post(f"/communities/{cid}/join")
+    owner.patch(base, {"slowmode_seconds": 60})
+    url = f"{base}/messages"
+    sent = member.post(url, {"content": "one"})
+    member.delete(f"{url}/{sent.data['id']}")
+    limited = member.post(url, {"content": "two"})
+    assert limited.status_code == 429
+    assert 0 < int(limited["Retry-After"]) <= 60
+    assert owner.post(url, {"content": "announcement"}).status_code == 201
+
+
+def test_slowmode_deadline_is_per_member(existing_guest_community):
+    owner, community = existing_guest_community
+    channels = f"/communities/{community}/channels"
+    channel = f"{channels}/{owner.get(channels).data[0]['id']}"
+    owner.patch(channel, {"slowmode_seconds": 10})
+    first, second = APIClient(), APIClient()
+    for member in (first, second):
+        member.post(f"/communities/{community}/join")
+
+    start = datetime.now(UTC)
+    messages = f"{channel}/messages"
+    with patch("django.utils.timezone.now", return_value=start):
+        assert first.post(messages, {"content": "First"}).status_code == 201
+    with patch(
+        "django.utils.timezone.now", return_value=start + timedelta(seconds=9, microseconds=999999)
+    ):
+        assert first.post(messages, {"content": "Too soon"}).status_code == 429
+        assert second.post(messages, {"content": "Independent clock"}).status_code == 201
+    with patch("django.utils.timezone.now", return_value=start + timedelta(seconds=10)):
+        assert first.post(messages, {"content": "At deadline"}).status_code == 201
+    assert [row["content"] for row in first.get(messages).data["items"]] == [
+        "First",
+        "Independent clock",
+        "At deadline",
+    ]

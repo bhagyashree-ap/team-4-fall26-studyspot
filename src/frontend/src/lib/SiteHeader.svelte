@@ -4,12 +4,66 @@
 	import { displayName } from './accounts';
 	import { session as shared, type Session } from './session.svelte';
 
-	/** Replaceable so a test can render the header in any state. */
-	let { session = shared }: { session?: Session } = $props();
+	type Props = {
+		/** Replaceable so a test can render the header in any state. */
+		session?: Session;
+		/**
+		 * What the Map tab should do on a page that is already showing
+		 * results. Given, the tab switches them to the map; left out, it is a
+		 * link to the homepage's map view.
+		 */
+		onMap?: () => void;
+	};
+
+	let { session = shared, onMap }: Props = $props();
+	const menuId = $props.id();
+	let mobileMenu: HTMLDivElement;
 
 	/** Back to this page after logging in, rather than to the homepage. */
 	const here = $derived(page.url.pathname + page.url.search);
 </script>
+
+{#snippet destinations()}
+	<a class="nav-link" href={resolve('/')}>Explore</a>
+	<a class="nav-link" data-sveltekit-reload href={resolve('/communities')}>Communities</a>
+	{#if onMap}
+		<!--
+				A button, because from here it goes nowhere: the results are on
+				this page already and navigating would lose the search.
+			-->
+		<button
+			class="nav-link"
+			type="button"
+			onclick={() => {
+				mobileMenu?.hidePopover();
+				onMap?.();
+			}}>Map</button
+		>
+	{:else}
+		<!--
+				From anywhere else it is a real link home, and says in the URL
+				what it is going there for -- which also makes the map view
+				something that can be sent to someone.
+			-->
+		<a class="nav-link" href="{resolve('/')}?view=map">Map</a>
+	{/if}
+	<!--
+			Nothing until the session is known, so a prerendered "Log in" never
+			flashes at someone who is already logged in. With accounts switched
+			off there is nothing to offer at all.
+		-->
+	{#if session.status === 'signed-in' && session.account}
+		<a class="sign-in account" href={resolve('/account')}>
+			<span class="avatar" aria-hidden="true">
+				{displayName(session.account).charAt(0).toUpperCase()}
+			</span>
+			<span class="name">{displayName(session.account)}</span>
+		</a>
+	{:else if session.status === 'signed-out'}
+		<button class="nav-link" type="button" onclick={() => session.logIn(here)}>Log in</button>
+		<a class="sign-in" href={resolve('/signup')}>Sign up</a>
+	{/if}
+{/snippet}
 
 <header>
 	<a class="brand" href={resolve('/')} aria-label="StudySpot home">
@@ -20,38 +74,20 @@
 		<span>StudySpot</span>
 	</a>
 	<nav aria-label="Main navigation">
-		<a class="nav-link" href={resolve('/')}>Explore</a>
-		<a class="nav-link" href={resolve('/communities')}>Communities</a>
-		<!-- svelte-ignore a11y_invalid_attribute -->
-		<a class="nav-link" href="#">Map</a>
-		<!-- svelte-ignore a11y_invalid_attribute -->
-		<a class="nav-link" href="#">Saved</a>
-		<!-- svelte-ignore a11y_invalid_attribute -->
-		<a class="nav-link" href="#">Suggest a spot</a>
-
-		<!--
-			Nothing until the session is known, so a prerendered "Log in" never
-			flashes at someone who is already logged in. With accounts switched
-			off there is nothing to offer at all.
-		-->
-		{#if session.status === 'signed-in' && session.account}
-			<a class="sign-in account" href={resolve('/account')}>
-				<span class="avatar" aria-hidden="true">
-					{displayName(session.account).charAt(0).toUpperCase()}
-				</span>
-				<span class="name">{displayName(session.account)}</span>
-			</a>
-		{:else if session.status === 'signed-out'}
-			<button class="nav-link" type="button" onclick={() => session.logIn(here)}>Log in</button>
-			<a class="sign-in" href={resolve('/signup')}>Sign up</a>
-		{/if}
+		<div class="wide-links">{@render destinations()}</div>
+		<button class="nav-link menu-trigger" popovertarget={menuId} aria-label="Site navigation"
+			>Menu <span aria-hidden="true">▾</span></button
+		>
+		<div id={menuId} bind:this={mobileMenu} popover="auto" class="compact-links">
+			{@render destinations()}
+		</div>
 	</nav>
 </header>
 
 <style>
 	header {
 		display: flex;
-		width: min(1180px, 100%);
+		width: 100%;
 		height: 76px;
 		align-items: center;
 		justify-content: space-between;
@@ -78,7 +114,8 @@
 		stroke-width: 2;
 	}
 
-	nav {
+	nav,
+	.wide-links {
 		display: flex;
 		align-items: center;
 		gap: 8px;
@@ -149,32 +186,45 @@
 		outline-offset: 3px;
 	}
 
-	@media (max-width: 560px) {
+	.menu-trigger,
+	.compact-links {
+		display: none;
+	}
+	.brand:focus-visible {
+		outline: 3px solid var(--color-brand-hover);
+		outline-offset: 2px;
+	}
+	@media (max-width: 740px) {
 		header {
-			height: auto;
-			min-height: 68px;
-			flex-wrap: wrap;
+			height: 56px;
+			gap: 8px;
+		}
+		.wide-links {
+			display: none;
+		}
+		.menu-trigger {
+			display: inline-flex;
 			gap: 6px;
-			padding: 10px 0;
 		}
-
-		nav {
-			width: 100%;
-			flex-wrap: wrap;
-			gap: 2px;
+		.compact-links:popover-open {
+			position: fixed;
+			inset: 52px 10px auto auto;
+			margin: 0;
+			display: grid;
+			gap: 4px;
+			width: min(15rem, calc(100vw - 20px));
+			max-height: calc(100dvh - 60px);
+			overflow: auto;
+			background: var(--site-menu-bg, white);
+			padding: 8px;
+			border: 1px solid var(--site-menu-border, #ddd);
+			border-radius: 12px;
+			box-shadow: 0 8px 22px #0002;
 		}
-
-		.nav-link,
-		.sign-in {
-			min-height: 40px;
-			padding: 0 10px;
-			font-size: 12px;
-		}
-
-		.avatar {
-			width: 26px;
-			height: 26px;
-			font-size: 12px;
+		.compact-links :is(.nav-link, .sign-in) {
+			margin: 0;
+			max-width: 100%;
+			justify-content: flex-start;
 		}
 	}
 </style>

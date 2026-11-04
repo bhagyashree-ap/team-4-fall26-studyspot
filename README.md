@@ -6,7 +6,7 @@
 
 StudySpot is an open-source app for discovering cafés and other third places across New York City. The goal is to make finding a useful place feel immediate: search by a name, category, or neighborhood and get a small, consistent set of results derived from NYC Open Data and OpenStreetMap.
 
-Public study communities are available at `/communities`. Anyone can create and join a group without signing in. Owners manage channels and members; members can share channel links, chat, search messages, and start private conversations. Guest ownership and membership are tied to the browser session.
+Public study communities are available at `/communities`. Sign in to browse the list or create a group. Owners manage channels and members; members can share channel links, chat, search messages, and start private conversations. Guest ownership and membership are tied to the browser session.
 
 > [!IMPORTANT]
 > StudySpot is deployed and working. `data/spots.json` holds 2,422 real places — 2,158 cafés, 227 public library branches, 21 special libraries, and 16 academic libraries and NYU campus buildings — 429 of them with a free public Wi-Fi hotspot nearby, and 108 cafés with a sidewalk-dining licence. Every one is somewhere a person can go: the city's 126 campus records anchor the "near which campus" label but are not published as spots, because an institution's administrative point is not a room. Search runs entirely in Postgres: full text ranks across name, campus, neighborhood and address, with trigram similarity behind it for misspellings, and it searches as you type. Results filter by borough, type, campus, and Wi-Fi. A spot detail page is the notable gap.
@@ -93,19 +93,9 @@ docker compose up --build --watch
 
 Open <http://localhost:7500>. Source changes are synchronized into the frontend and backend containers; dependency changes rebuild only the affected image.
 
-To try community writes before the account UI is integrated, run `docker compose exec backend uv run python manage.py createsuperuser`, sign in at <http://localhost:7501/admin/>, then visit <http://localhost:7500/communities>. The backend and frontend share the `localhost` session cookie. Public browsing needs no account.
+For a two-person local chat demo, start Postgres with `just start-db`, run `STUDYSPOT_CHAT_DEMO=true just dev-local`, and open <http://localhost:7500/communities>. Create a community, choose **⋯ → Invite people**, and open the invite in a private window to join as a second person. The default chat API requires sign-in.
 
-For a pinned toolchain, use [Nix](https://nixos.org/). You will still need a running Docker engine.
-
-```shell
-nix develop
-just setup
-just check
-```
-
-Developers with `direnv` can run `direnv allow` once to activate the flake automatically when entering the repository.
-
-Without Nix, install Bun, Python 3.12, uv, just, pre-commit, Git, and Docker, then run `just setup` followed by `just check`. Use `just --list` to see every supported repository command.
+For local development, install Bun, Python 3.12, uv, just, pre-commit, Git, and Docker, then run `just setup` followed by `just check`. Use `just --list` to see every supported repository command.
 
 ### Running the complete system
 
@@ -189,8 +179,6 @@ just test
 
 The suites run against a real Postgres because the schema depends on Postgres behaviour — trigram ranking most of all — so pytest-django creates and drops its own test database and loaded data is left alone.
 
-Run `just nix-check` to validate the pinned development environment. Tests live beside the behavior they verify.
-
 ## Deployment
 
 AWS is the deployment: CloudFront in front of S3 for the prerendered frontend and a Lambda function for the API, with RDS Postgres in private subnets. It is Terraform in [`infra/`](infra/), applied deliberately from a checkout rather than from CI, which would need long-lived AWS credentials in the repository:
@@ -201,7 +189,7 @@ just aws-init aws-build aws-apply aws-migrate aws-load aws-frontend aws-verify
 
 Because the RDS instance has no public endpoint, migrations and data loads run as Lambda invocations rather than from a laptop. `just aws-plan` previews a change, `just aws-db-stop` and `just aws-db-start` pause the database between work sessions, and `just aws-destroy` removes the stack. [`infra/README.md`](infra/README.md) covers the stack, what it costs, and the three account constraints the configuration works around.
 
-GitHub Actions runs repository, container, documentation, Nix, and Terraform checks, and performs no deployment of its own. Feature pull requests target `develop`; release pull requests merge `develop` into `main`. See the [deployment guide](docs/source/deployment.md) for the environment model and rollback behavior.
+GitHub Actions runs repository, container, documentation, and Terraform checks, and performs no deployment of its own. Feature pull requests target `develop`; release pull requests merge `develop` into `main`. See the [deployment guide](docs/source/deployment.md) for the environment model and rollback behavior.
 
 ## Documentation
 
@@ -218,7 +206,7 @@ Useful starting points include the [architecture](docs/source/architecture.md), 
 - **Data sources:** NYC Open Data, OpenStreetMap
 - **Database and search:** Postgres, with full-text search and `pg_trgm` — a container locally, Amazon RDS on AWS
 - **Deployment:** AWS (CloudFront, S3, API Gateway, Lambda, RDS) with Terraform
-- **Operations:** Nix, Docker Compose, just, pre-commit, GitHub Actions
+- **Operations:** Docker Compose, just, pre-commit, GitHub Actions
 - **Checks:** Prettier, ESLint, svelte-check, Ruff, ty, pytest, Django system checks, `terraform validate`
 
 ## Contributing

@@ -1,8 +1,10 @@
 <script lang="ts">
 	import { resolve } from '$app/paths';
 
+	import ResultsMap from './ResultsMap.svelte';
 	import { showsCampus } from './campus';
 	import { mapsUrl } from './maps';
+	import { place, readableCategory } from './spot';
 	import { orderByTrunk, routeColour, routeTextColour, walkMinutes } from './subway';
 	import type { StudySpot } from './contract';
 
@@ -12,9 +14,34 @@
 		hasMore: boolean;
 		loadingMore?: boolean;
 		onShowMore?: () => void;
+		/**
+		 * Which rendering of the results to show. Held by the page rather than
+		 * here, so that choosing the map survives the next search.
+		 */
+		view?: 'list' | 'map';
+		onView?: (next: 'list' | 'map') => void;
 	};
 
-	let { spots, total, hasMore, loadingMore = false, onShowMore }: Props = $props();
+	let {
+		spots,
+		total,
+		hasMore,
+		loadingMore = false,
+		onShowMore,
+		view = 'list',
+		onView
+	}: Props = $props();
+
+	/**
+	 * Whether the map gave up.
+	 *
+	 * The list is the same results, so a map that cannot be drawn falls back to
+	 * it rather than leaving the view empty. Sticky on purpose: retrying on
+	 * every search would mean waiting for the same failure again.
+	 */
+	let mapFailed = $state(false);
+
+	let showingMap = $derived(view === 'map' && !mapFailed);
 
 	/**
 	 * The spot whose link was just copied, so one card can say so without the
@@ -57,56 +84,80 @@
 			// claiming a copy that did not happen.
 		}
 	}
-
-	/**
-	 * The importer's vocabulary is snake_case (`academic_library`), because the
-	 * category belongs to the data rather than to the interface. Presenting it
-	 * is this component's job, not the API's.
-	 */
-	function readableCategory(category: string): string {
-		const words = category.replace(/_/g, ' ');
-		return words.charAt(0).toUpperCase() + words.slice(1);
-	}
-
-	/**
-	 * Neighborhood is absent for some records and borough never is, so the two
-	 * are joined only when both exist rather than leaving a stray separator.
-	 */
-	function place(spot: StudySpot): string {
-		return spot.neighborhood ? `${spot.neighborhood}, ${spot.borough}` : spot.borough;
-	}
 </script>
 
 <section aria-label="Search results">
-	<p class="count">
-		{#if total === spots.length}
-			{total} {total === 1 ? 'place' : 'places'}
-		{:else}
-			Showing {spots.length} of {total} places
-		{/if}
-	</p>
+	<div class="head">
+		<!--
+			The live region, now that the results themselves are outside one:
+			the useful announcement is how many places a search found, not a
+			reading of every card in it.
+		-->
+		<p class="count" aria-live="polite">
+			{#if total === spots.length}
+				{total} {total === 1 ? 'place' : 'places'}
+			{:else}
+				Showing {spots.length} of {total} places
+			{/if}
+		</p>
 
-	<ul>
-		{#each spots as spot (spot.id)}
-			<li>
-				<h3>
-					<!--
+		<!--
+			A pair of toggles rather than radios: `aria-pressed` says which one
+			is on without the arrow-key handling a radio group owes its users,
+			and a segmented control is what this looks like.
+		-->
+		<div class="views" role="group" aria-label="Result view">
+			<button type="button" aria-pressed={!showingMap} onclick={() => onView?.('list')}>
+				<svg viewBox="0 0 24 24" aria-hidden="true">
+					<path d="M4 7h16M4 12h16M4 17h16" />
+				</svg>
+				List
+			</button>
+			<button type="button" aria-pressed={showingMap} onclick={() => onView?.('map')}>
+				<svg viewBox="0 0 24 24" aria-hidden="true">
+					<path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z" />
+					<circle cx="12" cy="10" r="2.4" />
+				</svg>
+				Map
+			</button>
+		</div>
+	</div>
+
+	{#if mapFailed && view === 'map'}
+		<p class="status" role="status">
+			The map could not be loaded, so the results are listed instead.
+		</p>
+	{/if}
+
+	{#if showingMap}
+		<!--
+			The same `spots` the list below would render, which is what keeps
+			the two views showing the same filtered results: there is one array,
+			not a copy per view.
+		-->
+		<ResultsMap {spots} onUnavailable={() => (mapFailed = true)} />
+	{:else}
+		<ul>
+			{#each spots as spot (spot.id)}
+				<li>
+					<h3>
+						<!--
 						Every detail page is prerendered, so this is a real document
 						rather than a route the browser has to assemble: the link
 						works on a fresh tab, in a shared message, and to a crawler.
 					-->
-					<a href={resolve(`/spots/${spot.id}` as '/')}>{spot.name}</a>
-				</h3>
-				<p class="meta">
-					<span class="category">{readableCategory(spot.category)}</span>
-					<span aria-hidden="true">·</span>
-					<span>{place(spot)}</span>
-				</p>
-				{#if spot.address}
-					<p class="address">{spot.address}</p>
-				{/if}
-				{#if spot.operator && spot.operator !== spot.name}
-					<!--
+						<a href={resolve(`/spots/${spot.id}` as '/')}>{spot.name}</a>
+					</h3>
+					<p class="meta">
+						<span class="category">{readableCategory(spot.category)}</span>
+						<span aria-hidden="true">·</span>
+						<span>{place(spot)}</span>
+					</p>
+					{#if spot.address}
+						<p class="address">{spot.address}</p>
+					{/if}
+					{#if spot.operator && spot.operator !== spot.name}
+						<!--
 						Who runs it, which for a library branch is its system. Worth
 						showing because the three systems have separate membership,
 						and a branch's own name never says which one it belongs to.
@@ -114,34 +165,34 @@
 						Hidden when it merely repeats the name, which is what FacDB
 						stores for the academic and special libraries.
 					-->
-					<p class="operator">{spot.operator}</p>
-				{/if}
-				{#if spot.subway_station && spot.subway_routes && spot.subway_metres !== null}
-					<!--
+						<p class="operator">{spot.operator}</p>
+					{/if}
+					{#if spot.subway_station && spot.subway_routes && spot.subway_metres !== null}
+						<!--
 						Which trains, then how long the walk. Lines are coloured
 						because people read the colour faster than the letter, and
 						the walk is in minutes because nobody converts 409 m.
 					-->
-					<p class="subway">
-						<span class="bullets">
-							{#each orderByTrunk(spot.subway_routes.split(' ')) as route (route)}
-								<span
-									class="bullet"
-									style:background={routeColour(route)}
-									style:color={routeTextColour(route)}>{route}</span
-								>
-							{/each}
-						</span>
-						{walkMinutes(spot.subway_metres)} min walk · {spot.subway_station}
-					</p>
-				{/if}
+						<p class="subway">
+							<span class="bullets">
+								{#each orderByTrunk(spot.subway_routes.split(' ')) as route (route)}
+									<span
+										class="bullet"
+										style:background={routeColour(route)}
+										style:color={routeTextColour(route)}>{route}</span
+									>
+								{/each}
+							</span>
+							{walkMinutes(spot.subway_metres)} min walk · {spot.subway_station}
+						</p>
+					{/if}
 
-				{#if showsCampus(spot)}
-					<!-- Proximity, never affiliation: see the contract. -->
-					<p class="campus">Near {spot.university}</p>
-				{/if}
-				{#if spot.no_purchase_needed || spot.free_public_wifi || spot.indoor_seating === true}
-					<!--
+					{#if showsCampus(spot)}
+						<!-- Proximity, never affiliation: see the contract. -->
+						<p class="campus">Near {spot.university}</p>
+					{/if}
+					{#if spot.no_purchase_needed || spot.free_public_wifi || spot.indoor_seating === true}
+						<!--
 						Every badge is shown only when true, and for the same reason:
 						the absence of one is not evidence of its opposite. A false
 						free_public_wifi means no hotspot the city publishes sits
@@ -155,83 +206,84 @@
 						states are spelled out; a card has room for the good news
 						only.
 					-->
-					<p class="badges">
-						{#if spot.no_purchase_needed}
-							<!--
+						<p class="badges">
+							{#if spot.no_purchase_needed}
+								<!--
 								Money, not entry. A campus building costs nothing and
 								still wants the university's credentials, which is why
 								this does not say "open to all".
 							-->
-							<span class="badge">
-								<svg viewBox="0 0 24 24" aria-hidden="true">
-									<path d="M3.5 12.3V5.2a1.7 1.7 0 0 1 1.7-1.7h7.1l8.2 8.2-8.8 8.8-8.2-8.2Z" />
-									<circle cx="8" cy="8" r="1.1" />
-								</svg>
-								No purchase needed
-							</span>
-						{/if}
-						{#if spot.free_public_wifi}
-							<span class="badge">
-								<svg viewBox="0 0 24 24" aria-hidden="true">
-									<path d="M5 12.5a10 10 0 0 1 14 0" />
-									<path d="M8.5 16a5 5 0 0 1 7 0" />
-									<circle cx="12" cy="19.5" r="1" />
-								</svg>
-								Free public Wi-Fi
-							</span>
-						{/if}
-						{#if spot.indoor_seating === true}
-							<!--
+								<span class="badge">
+									<svg viewBox="0 0 24 24" aria-hidden="true">
+										<path d="M3.5 12.3V5.2a1.7 1.7 0 0 1 1.7-1.7h7.1l8.2 8.2-8.8 8.8-8.2-8.2Z" />
+										<circle cx="8" cy="8" r="1.1" />
+									</svg>
+									No purchase needed
+								</span>
+							{/if}
+							{#if spot.free_public_wifi}
+								<span class="badge">
+									<svg viewBox="0 0 24 24" aria-hidden="true">
+										<path d="M5 12.5a10 10 0 0 1 14 0" />
+										<path d="M8.5 16a5 5 0 0 1 7 0" />
+										<circle cx="12" cy="19.5" r="1" />
+									</svg>
+									Free public Wi-Fi
+								</span>
+							{/if}
+							{#if spot.indoor_seating === true}
+								<!--
 								Somewhere to sit inside, which for a café in February is
 								the question. "Indoor seating" and not "seating": the
 								data says inside, and a pavement table is a different
 								field.
 							-->
-							<span class="badge">
-								<svg viewBox="0 0 24 24" aria-hidden="true">
-									<path d="M7 20v-5.5h10V20" />
-									<path d="M5.5 14.5h13" />
-									<path d="M8 11V5.5a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 16 5.5V11" />
-								</svg>
-								Indoor seating
-							</span>
-						{/if}
-					</p>
-				{/if}
+								<span class="badge">
+									<svg viewBox="0 0 24 24" aria-hidden="true">
+										<path d="M7 20v-5.5h10V20" />
+										<path d="M5.5 14.5h13" />
+										<path d="M8 11V5.5a1.5 1.5 0 0 1 1.5-1.5h5A1.5 1.5 0 0 1 16 5.5V11" />
+									</svg>
+									Indoor seating
+								</span>
+							{/if}
+						</p>
+					{/if}
 
-				<p class="actions">
-					<!--
+					<p class="actions">
+						<!--
 						A link, not an embedded map: it opens the viewer's own maps app with
 						the place pinned, where walking and subway directions are one tap
 						away. Nothing is loaded from anyone else to render this card.
 					-->
-					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
-					<a class="maps" href={mapsUrl(spot)} rel="noreferrer noopener" target="_blank">
-						<svg viewBox="0 0 24 24" aria-hidden="true">
-							<path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z" />
-							<circle cx="12" cy="10" r="2.4" />
-						</svg>
-						Maps
-					</a>
+						<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
+						<a class="maps" href={mapsUrl(spot)} rel="noreferrer noopener" target="_blank">
+							<svg viewBox="0 0 24 24" aria-hidden="true">
+								<path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11Z" />
+								<circle cx="12" cy="10" r="2.4" />
+							</svg>
+							Maps
+						</a>
 
-					<button type="button" onclick={() => share(spot)}>
-						{#if copied === spot.id}
-							<svg viewBox="0 0 24 24" aria-hidden="true">
-								<path d="m5 12.5 4.5 4.5L19 7.5" />
-							</svg>
-							Copied
-						{:else}
-							<svg viewBox="0 0 24 24" aria-hidden="true">
-								<path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" />
-								<path d="M4.5 14v4.5a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5V14" />
-							</svg>
-							Share
-						{/if}
-					</button>
-				</p>
-			</li>
-		{/each}
-	</ul>
+						<button type="button" onclick={() => share(spot)}>
+							{#if copied === spot.id}
+								<svg viewBox="0 0 24 24" aria-hidden="true">
+									<path d="m5 12.5 4.5 4.5L19 7.5" />
+								</svg>
+								Copied
+							{:else}
+								<svg viewBox="0 0 24 24" aria-hidden="true">
+									<path d="M12 16V4m0 0L7.5 8.5M12 4l4.5 4.5" />
+									<path d="M4.5 14v4.5a1.5 1.5 0 0 0 1.5 1.5h12a1.5 1.5 0 0 0 1.5-1.5V14" />
+								</svg>
+								Share
+							{/if}
+						</button>
+					</p>
+				</li>
+			{/each}
+		</ul>
+	{/if}
 
 	{#if hasMore}
 		<button type="button" onclick={() => onShowMore?.()} disabled={loadingMore}>
@@ -248,11 +300,83 @@
 		text-align: left;
 	}
 
-	.count {
+	.head {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
 		margin: 0 0 20px;
+	}
+
+	.count {
+		margin: 0;
 		color: var(--color-muted);
 		font-size: 14px;
 		font-weight: 600;
+	}
+
+	.views {
+		display: inline-flex;
+		padding: 3px;
+		border: 1px solid var(--color-border);
+		border-radius: 999px;
+		background: white;
+	}
+
+	/*
+		`.views button` throughout, because the "Show more" rule at the bottom
+		of this file sets `display: block` and `margin: 28px auto 0` on every
+		button in the component -- which is what once pushed the Maps and Share
+		buttons out of line with each other.
+	*/
+	.views button {
+		display: inline-flex;
+		min-height: 34px;
+		margin: 0;
+		align-items: center;
+		gap: 6px;
+		padding: 0 14px;
+		border: 0;
+		border-radius: 999px;
+		color: var(--color-muted);
+		background: transparent;
+		font-size: 13px;
+		font-weight: 650;
+		cursor: pointer;
+		transition:
+			color 160ms ease,
+			background-color 160ms ease;
+	}
+
+	.views button svg {
+		width: 15px;
+		flex: none;
+		fill: none;
+		stroke: currentColor;
+		stroke-linecap: round;
+		stroke-linejoin: round;
+		stroke-width: 2;
+	}
+
+	.views button:hover:not([aria-pressed='true']) {
+		color: var(--color-text);
+	}
+
+	/* The selected view, which `aria-pressed` already says to a reader. */
+	.views button[aria-pressed='true'] {
+		color: white;
+		background: var(--color-text);
+	}
+
+	.status {
+		margin: 0 0 16px;
+		padding: 14px 16px;
+		border: 1px solid var(--color-border);
+		border-radius: 14px;
+		color: var(--color-muted);
+		background: white;
+		font-size: 14px;
 	}
 
 	ul {

@@ -44,7 +44,6 @@ studyspot/
 │       └── bun.lock
 ├── tests/e2e/                   # Tests against a running deployment
 ├── compose.yaml                 # Local frontend, API, and Postgres services
-├── flake.nix                    # Pinned Nix development environment
 └── justfile                     # Canonical development commands
 ```
 
@@ -102,8 +101,7 @@ Set up the locked dependencies and Git hooks once:
 just setup
 ```
 
-If you use Nix, enter `nix develop` first. Without Nix, install the prerequisites listed in the
-README: Bun, Python 3.12, uv, just, pre-commit, Git, and Docker Compose 2.23 or newer.
+The prerequisites for these commands are Bun, Python 3.12, uv, just, pre-commit, Git, and Docker Compose 2.23 or newer.
 
 Before pushing, run the repository's complete supported check suite:
 
@@ -129,8 +127,7 @@ runs both `just check` and `just test`.
 If your change touches `infra/`, also run `just infra-check`, which formats and validates the
 Terraform without touching an AWS account.
 
-Use `just start` for a local container smoke test, `just dev` for live source updates, and
-`just nix-check` when changing the Nix environment. See `just --list` for all supported commands.
+Use `just start` for a local container smoke test and `just dev` for live source updates. See `just --list` for all supported commands.
 
 ## Opening a pull request
 
@@ -194,9 +191,8 @@ no deployment credentials of any kind.
 | `Repository checks` | Installs locked dependencies and runs `just check` and `just test` against a Postgres service container, including a warning-strict Sphinx build | Every pull request and pushes to `develop` or `main` |
 | `Terraform` | Formats and validates `infra/terraform/` with no AWS credentials | Every pull request and pushes to `develop` or `main` |
 | `Container smoke test` | Builds the Compose services, waits for health checks, and probes the frontend and API | Every pull request and pushes to `develop` or `main` |
-| `Nix flake` | Evaluates the pinned Nix development environment | Every pull request and pushes to `develop` or `main` |
 
-`Repository checks`, `Terraform`, `Container smoke test`, and `Nix flake` are
+`Repository checks`, `Terraform`, and `Container smoke test` are
 protected-branch requirements. Branches must also be current, review conversations must be resolved, and force
 pushes and branch deletion are disabled.
 

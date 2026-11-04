@@ -174,3 +174,82 @@ describe('the indoor-seating badge', () => {
 		await expect.element(page.getByText(/no Wi-Fi|Wi-Fi for customers/i)).not.toBeInTheDocument();
 	});
 });
+
+describe('switching between the list and the map', () => {
+	const OTHER: StudySpot = {
+		...SPOT,
+		id: 'facdb:tamiment',
+		name: 'Tamiment Library',
+		address: '70 Washington Square South, New York, NY 10012'
+	};
+
+	it('offers both views and says which one is showing', async () => {
+		render(SpotResults, { spots: [SPOT], total: 1, hasMore: false, view: 'list' });
+
+		const list = page.getByRole('button', { name: 'List' });
+		const map = page.getByRole('button', { name: 'Map' });
+
+		await expect.element(list).toBeInTheDocument();
+		expect(list.element().getAttribute('aria-pressed')).toBe('true');
+		expect(map.element().getAttribute('aria-pressed')).toBe('false');
+	});
+
+	it('asks the page to switch rather than switching by itself', async () => {
+		// The choice is held a level up so that it survives the next search.
+		// A component that flipped its own state would look right in this test
+		// and reset itself the moment someone typed another query.
+		let asked: string | null = null;
+		render(SpotResults, {
+			spots: [SPOT],
+			total: 1,
+			hasMore: false,
+			view: 'list',
+			onView: (next) => (asked = next)
+		});
+
+		await page.getByRole('button', { name: 'Map' }).click();
+		expect(asked).toBe('map');
+	});
+
+	it('shows the cards in list view and the pins in map view', async () => {
+		render(SpotResults, { spots: [SPOT], total: 1, hasMore: false, view: 'map' });
+
+		// The pin is a button named for the place; the card's title is a link.
+		await expect.element(page.getByRole('button', { name: 'Bobst Library' })).toBeInTheDocument();
+		await expect.element(page.getByRole('link', { name: 'Bobst Library' })).not.toBeInTheDocument();
+	});
+
+	/**
+	 * The acceptance criterion the two views exist to satisfy. One array feeds
+	 * both, so neither can show a set the other does not -- which is why the
+	 * assertion is about the count rather than about reconciling two lists.
+	 */
+	it('counts the places it was given in list view', async () => {
+		render(SpotResults, { spots: [SPOT, OTHER], total: 2, hasMore: false, view: 'list' });
+
+		await expect.element(page.getByText('2 places')).toBeInTheDocument();
+	});
+
+	it('counts the same places in map view', async () => {
+		render(SpotResults, { spots: [SPOT, OTHER], total: 2, hasMore: false, view: 'map' });
+
+		await expect.element(page.getByText('2 places')).toBeInTheDocument();
+		// And draws one pin for each of them.
+		await expect.element(page.getByRole('button', { name: 'Bobst Library' })).toBeInTheDocument();
+		await expect
+			.element(page.getByRole('button', { name: 'Tamiment Library' }))
+			.toBeInTheDocument();
+	});
+
+	it('keeps Show more in map view, because more results are more pins', async () => {
+		render(SpotResults, {
+			spots: [SPOT],
+			total: 40,
+			hasMore: true,
+			view: 'map'
+		});
+
+		await expect.element(page.getByRole('button', { name: 'Show more' })).toBeInTheDocument();
+		await expect.element(page.getByText('Showing 1 of 40 places')).toBeInTheDocument();
+	});
+});

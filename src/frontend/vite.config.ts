@@ -6,6 +6,22 @@ import { sveltekit } from '@sveltejs/kit/vite';
 
 const apiProxyTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:7501';
 
+/**
+ * Where the basemap comes from in development.
+ *
+ * In production the PMTiles archive sits in the site bucket and is served by
+ * the same CloudFront distribution as the page, so the browser fetches it
+ * same-origin. Nothing builds it into `static/`: it is 31 MB, it changes a few
+ * times a year, and committing it would put it in every clone and every
+ * deploy.
+ *
+ * So locally there is no `/tiles` to fetch and the maps simply did not draw.
+ * Proxying the prefix to the deployed site fixes that without a copy on disk;
+ * range requests pass straight through. `.claude/launch.json` fills this in
+ * from `terraform output site_url`.
+ */
+const tilesProxyTarget = process.env.TILES_PROXY_TARGET;
+
 // One deployment. The app is served as prerendered files from S3 behind
 // CloudFront, which needs no server at all because every route sets
 // `prerender = true`, so `bun run build` produces the S3 upload directly.
@@ -15,6 +31,7 @@ const apiProxyTarget = process.env.API_PROXY_TARGET ?? 'http://localhost:7501';
 const adapter = staticAdapter({ fallback: '404.html' });
 
 export default defineConfig({
+	ssr: { noExternal: ['@lucide/svelte'] },
 	plugins: [
 		tailwindcss(),
 		sveltekit({
@@ -32,7 +49,8 @@ export default defineConfig({
 				target: apiProxyTarget,
 				changeOrigin: true,
 				rewrite: (path) => path.replace(/^\/api/, '')
-			}
+			},
+			...(tilesProxyTarget ? { '/tiles': { target: tilesProxyTarget, changeOrigin: true } } : {})
 		}
 	},
 	test: {

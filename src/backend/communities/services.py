@@ -146,6 +146,22 @@ def create_invite(community: Community, user: object, data: dict) -> tuple[Invit
     return invite, token
 
 
+def check_invite(invite: Invite) -> None:
+    if invite.revoked or (invite.expires_at and invite.expires_at <= timezone.now()):
+        raise NotFound("Invite not found or expired.")
+    if invite.max_uses is not None and invite.uses >= invite.max_uses:
+        raise NotFound("Invite has reached its use limit.")
+
+
+def preview_invite(token: str) -> Community:
+    digest = hashlib.sha256(token.encode()).hexdigest()
+    invite = Invite.objects.select_related("community").filter(token_hash=digest).first()
+    if invite is None:
+        raise NotFound("Invite not found or expired.")
+    check_invite(invite)
+    return invite.community
+
+
 @transaction.atomic
 def redeem(
     token: str,
@@ -161,14 +177,7 @@ def redeem(
         raise NotFound("Invite not found or expired.")
     Community.objects.select_for_update().get(pk=community_id)
     invite = Invite.objects.select_for_update().select_related("community").get(token_hash=digest)
-    if (
-        invite is None
-        or invite.revoked
-        or (invite.expires_at and invite.expires_at <= timezone.now())
-    ):
-        raise NotFound("Invite not found or expired.")
-    if invite.max_uses is not None and invite.uses >= invite.max_uses:
-        raise NotFound("Invite has reached its use limit.")
+    check_invite(invite)
     if user is None:
         if guest_id is None or expires_at is None:
             raise ValueError("Guest identity and expiry are required.")

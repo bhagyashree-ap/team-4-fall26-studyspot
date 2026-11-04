@@ -1,6 +1,7 @@
 """Create repeatable local-only sample communities and conversations."""
 
 import hashlib
+from typing import TypedDict
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
@@ -9,6 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from accounts.models import Account, AccountType
+from communities.guest_names import guest_name
 from communities.models import (
     Channel,
     Community,
@@ -20,19 +22,44 @@ from communities.models import (
     Reaction,
 )
 
+
+class GroupSpec(TypedDict):
+    name: str
+    description: str
+    school: str
+    course: str
+    owner: str
+    members: list[str]
+    # Channel name to that channel's messages, each an (author handle, body) pair.
+    # Insertion order decides the channel positions.
+    channels: dict[str, list[tuple[str, str]]]
+    # Channel name to (reactor handle, emoji) pairs, applied to the channel's
+    # messages in order: the nth pair reacts to the nth message.
+    reactions: dict[str, list[tuple[str, str]]]
+    # Channel name to the index, within that channel's messages, of the one to pin.
+    pins: dict[str, int]
+
+
+# "from" is a keyword, so this one cannot use the class syntax.
+DirectMessageSpec = TypedDict(
+    "DirectMessageSpec",
+    {"from": str, "to": str, "messages": list[tuple[str, str]]},
+)
+
+
 PEOPLE = {
-    "maya":   "Maya Chen",
+    "maya": "Maya Chen",
     "jordan": "Jordan Rivera",
-    "sam":    "Sam Okonkwo",
-    "alex":   "Alex Park",
-    "priya":  "Priya Nair",
-    "wei":    "Wei Zhang",
-    "nina":   "Nina Kowalski",
+    "sam": "Sam Okonkwo",
+    "alex": "Alex Park",
+    "priya": "Priya Nair",
+    "wei": "Wei Zhang",
+    "nina": "Nina Kowalski",
     "oliver": "Oliver Reyes",
-    "zara":   "Zara Ahmed",
+    "zara": "Zara Ahmed",
 }
 
-GROUPS = [
+GROUPS: list[GroupSpec] = [
     {
         "name": "NYU Calculus Study Circle",
         "description": "Problem sets, office hours, and exam prep for Calculus I.",
@@ -42,74 +69,122 @@ GROUPS = [
         "members": ["jordan", "sam", "alex", "priya"],
         "channels": {
             "general": [
-                ("maya",   "Hey everyone! Welcome to the NYU Calculus study circle 🎉"),
-                ("jordan", "Thanks for setting this up Maya! Really needed a study group for this class."),
-                ("sam",    "Same, Calc has been rougher than I expected."),
-                ("alex",   "The problem sets are no joke. Anyone else struggling with section 4.3?"),
-                ("priya",  "Yes! The related rates problems are killing me."),
-                ("maya",   "Ok let's schedule a session this week. Thursday 6pm work for everyone?"),
+                ("maya", "Hey everyone! Welcome to the NYU Calculus study circle 🎉"),
+                (
+                    "jordan",
+                    "Thanks for setting this up Maya! Really needed a study group for this class.",
+                ),
+                ("sam", "Same, Calc has been rougher than I expected."),
+                ("alex", "The problem sets are no joke. Anyone else struggling with section 4.3?"),
+                ("priya", "Yes! The related rates problems are killing me."),
+                ("maya", "Ok let's schedule a session this week. Thursday 6pm work for everyone?"),
                 ("jordan", "Thursday works for me!"),
-                ("sam",    "I can do Thursday. Library study room?"),
-                ("alex",   "Thursday works. Bobst 4th floor has big tables."),
-                ("priya",  "Perfect, I'll book a room. See everyone Thursday!"),
-                ("maya",   "Also Prof. Kim's office hours are Tuesday 2-4pm if anyone wants to go together."),
+                ("sam", "I can do Thursday. Library study room?"),
+                ("alex", "Thursday works. Bobst 4th floor has big tables."),
+                ("priya", "Perfect, I'll book a room. See everyone Thursday!"),
+                (
+                    "maya",
+                    "Also Prof. Kim's office hours are Tuesday 2-4pm if anyone wants to go together.",
+                ),
                 ("jordan", "Good to know. Anyone gone to office hours yet?"),
-                ("sam",    "I went last week. She's really helpful, explains things differently than in lecture."),
+                (
+                    "sam",
+                    "I went last week. She's really helpful, explains things differently than in lecture.",
+                ),
             ],
             "problem-sets": [
-                ("priya",  "Starting on PS5 now. Anyone want to work through it together?"),
-                ("alex",   "Yes! Problem 3 is integration by parts right?"),
-                ("priya",  "Yeah, the LIATE rule applies. Try u = ln(x) first."),
-                ("maya",   "For integration by parts remember: ∫u dv = uv − ∫v du. LIATE helps pick u: Logs, Inverse trig, Algebraic, Trig, Exponential."),
+                ("priya", "Starting on PS5 now. Anyone want to work through it together?"),
+                ("alex", "Yes! Problem 3 is integration by parts right?"),
+                ("priya", "Yeah, the LIATE rule applies. Try u = ln(x) first."),
+                (
+                    "maya",
+                    "For integration by parts remember: ∫u dv = uv − ∫v du. LIATE helps pick u: Logs, Inverse trig, Algebraic, Trig, Exponential.",
+                ),
                 ("jordan", "Oh that's a great mnemonic. So for ∫x·e^x dx we pick u=x?"),
-                ("maya",   "Exactly! u=x (algebraic), dv=e^x dx. Then du=dx, v=e^x."),
-                ("sam",    "I got stuck on problem 7 — implicit differentiation with a trig function."),
-                ("priya",  "Differentiate both sides with respect to x, don't forget the chain rule on y terms."),
-                ("alex",   "For sin(xy) = x, you get cos(xy)·(y + x·y') = 1, then solve for y'."),
-                ("sam",    "Oh I see it now. Thanks!"),
+                ("maya", "Exactly! u=x (algebraic), dv=e^x dx. Then du=dx, v=e^x."),
+                (
+                    "sam",
+                    "I got stuck on problem 7 — implicit differentiation with a trig function.",
+                ),
+                (
+                    "priya",
+                    "Differentiate both sides with respect to x, don't forget the chain rule on y terms.",
+                ),
+                ("alex", "For sin(xy) = x, you get cos(xy)·(y + x·y') = 1, then solve for y'."),
+                ("sam", "Oh I see it now. Thanks!"),
                 ("jordan", "PS5 problem 12 is a related rates one. A ladder sliding down a wall."),
-                ("maya",   "Classic! Draw a diagram first, label everything. x² + y² = L² where L is constant."),
-                ("priya",  "Differentiate implicitly with respect to t: 2x(dx/dt) + 2y(dy/dt) = 0."),
+                (
+                    "maya",
+                    "Classic! Draw a diagram first, label everything. x² + y² = L² where L is constant.",
+                ),
+                ("priya", "Differentiate implicitly with respect to t: 2x(dx/dt) + 2y(dy/dt) = 0."),
                 ("jordan", "Got it! Plug in the given values for x, y, and dx/dt to find dy/dt."),
             ],
             "exam-prep": [
-                ("maya",   "Midterm is in 3 weeks! Let's make a study plan."),
-                ("jordan", "I made a review outline — covers limits, derivatives, and integration basics."),
-                ("sam",    "Can you share it in resources? That would be super helpful."),
+                ("maya", "Midterm is in 3 weeks! Let's make a study plan."),
+                (
+                    "jordan",
+                    "I made a review outline — covers limits, derivatives, and integration basics.",
+                ),
+                ("sam", "Can you share it in resources? That would be super helpful."),
                 ("jordan", "Posted! It's based on the syllabus topics."),
-                ("alex",   "The chain rule section was confusing for me in lecture. Anyone have good notes?"),
-                ("priya",  "Chain rule: d/dx[f(g(x))] = f'(g(x))·g'(x). Think 'outside times inside prime'."),
-                ("alex",   "That phrasing helps actually. Outside times inside prime."),
-                ("maya",   "For the exam, implicit differentiation shows up a lot. Practice those!"),
-                ("sam",    "Also related rates. Prof. Kim said there will definitely be one on the midterm."),
+                (
+                    "alex",
+                    "The chain rule section was confusing for me in lecture. Anyone have good notes?",
+                ),
+                (
+                    "priya",
+                    "Chain rule: d/dx[f(g(x))] = f'(g(x))·g'(x). Think 'outside times inside prime'.",
+                ),
+                ("alex", "That phrasing helps actually. Outside times inside prime."),
+                ("maya", "For the exam, implicit differentiation shows up a lot. Practice those!"),
+                (
+                    "sam",
+                    "Also related rates. Prof. Kim said there will definitely be one on the midterm.",
+                ),
                 ("jordan", "I'll do all the practice problems from chapter 3 this weekend."),
-                ("priya",  "Let's do a mock exam session next Tuesday? I'll bring the old midterms."),
-                ("maya",   "Yes! Tuesday 5pm? Same room as Thursday."),
-                ("alex",   "I'll be there. Also don't forget to review L'Hôpital's rule."),
+                (
+                    "priya",
+                    "Let's do a mock exam session next Tuesday? I'll bring the old midterms.",
+                ),
+                ("maya", "Yes! Tuesday 5pm? Same room as Thursday."),
+                ("alex", "I'll be there. Also don't forget to review L'Hôpital's rule."),
             ],
             "resources": [
-                ("jordan", "Here's my chapter 3-5 review outline: integration rules, derivative rules, and trig identities."),
-                ("priya",  "Paul's Online Math Notes is great for Calc I: tutorial.math.lamar.edu"),
-                ("sam",    "Professor Leonard on YouTube is amazing for calculus explanations."),
-                ("alex",   "Khan Academy has good practice problems too, especially for related rates."),
-                ("maya",   "MIT OpenCourseWare has old exams: ocw.mit.edu — search 18.01"),
-                ("jordan", "Also the Wolfram Alpha step-by-step solver is useful for checking your work."),
-                ("priya",  "Photomath app works for checking derivatives if you're on your phone."),
-                ("sam",    "I found a really good LIATE rule cheat sheet, posting it as an image."),
-                ("maya",   "Don't forget: office hours notes from last week covered exactly what's on the exam."),
+                (
+                    "jordan",
+                    "Here's my chapter 3-5 review outline: integration rules, derivative rules, and trig identities.",
+                ),
+                ("priya", "Paul's Online Math Notes is great for Calc I: tutorial.math.lamar.edu"),
+                ("sam", "Professor Leonard on YouTube is amazing for calculus explanations."),
+                (
+                    "alex",
+                    "Khan Academy has good practice problems too, especially for related rates.",
+                ),
+                ("maya", "MIT OpenCourseWare has old exams: ocw.mit.edu — search 18.01"),
+                (
+                    "jordan",
+                    "Also the Wolfram Alpha step-by-step solver is useful for checking your work.",
+                ),
+                ("priya", "Photomath app works for checking derivatives if you're on your phone."),
+                ("sam", "I found a really good LIATE rule cheat sheet, posting it as an image."),
+                (
+                    "maya",
+                    "Don't forget: office hours notes from last week covered exactly what's on the exam.",
+                ),
             ],
         },
         "reactions": {
-            "general":      [("maya",   "🎉"), ("priya",  "👍")],
-            "problem-sets": [("alex",   "👍"), ("sam",    "🔥")],
-            "exam-prep":    [("jordan", "🎉"), ("alex",   "👍")],
-            "resources":    [("maya",   "👍"), ("priya",  "🔥")],
+            "general": [("maya", "🎉"), ("priya", "👍")],
+            "problem-sets": [("alex", "👍"), ("sam", "🔥")],
+            "exam-prep": [("jordan", "🎉"), ("alex", "👍")],
+            "resources": [("maya", "👍"), ("priya", "🔥")],
         },
         "pins": {
-            "general":      0,
+            "general": 0,
             "problem-sets": 3,
-            "exam-prep":    6,
-            "resources":    0,
+            "exam-prep": 6,
+            "resources": 0,
         },
     },
     {
@@ -121,76 +196,127 @@ GROUPS = [
         "members": ["priya", "sam", "wei"],
         "channels": {
             "general": [
-                ("alex",  "Welcome to the Brooklyn Coding Collective! 💻"),
-                ("priya", "Finally a study group for this class. The BST assignment has me stumped."),
-                ("sam",   "Same. I've been staring at the insert method for like two hours."),
-                ("wei",   "The recursive approach is cleaner imo. Want me to walk through it?"),
-                ("alex",  "Yes please! I'm getting confused with the base cases."),
-                ("wei",   "Base case: if root is null, return new node. Otherwise compare key and recurse left or right."),
+                ("alex", "Welcome to the Brooklyn Coding Collective! 💻"),
+                (
+                    "priya",
+                    "Finally a study group for this class. The BST assignment has me stumped.",
+                ),
+                ("sam", "Same. I've been staring at the insert method for like two hours."),
+                ("wei", "The recursive approach is cleaner imo. Want me to walk through it?"),
+                ("alex", "Yes please! I'm getting confused with the base cases."),
+                (
+                    "wei",
+                    "Base case: if root is null, return new node. Otherwise compare key and recurse left or right.",
+                ),
                 ("priya", "Oh that makes sense. The recursion bottoms out at a null leaf."),
-                ("sam",   "When's the BST assignment due?"),
-                ("alex",  "Next Friday. We should pair program over video call this weekend."),
+                ("sam", "When's the BST assignment due?"),
+                ("alex", "Next Friday. We should pair program over video call this weekend."),
                 ("priya", "Saturday afternoon works for me."),
-                ("wei",   "Saturday 2pm? I can share my screen."),
-                ("sam",   "I'll be there. We can use the Discord— I mean, this platform 😄"),
-                ("alex",  "Haha yes. See everyone Saturday!"),
+                ("wei", "Saturday 2pm? I can share my screen."),
+                ("sam", "I'll be there. We can use the Discord— I mean, this platform 😄"),
+                ("alex", "Haha yes. See everyone Saturday!"),
             ],
             "algorithms": [
-                ("wei",   "Starting a thread on BST implementation. Key operations: insert, search, delete."),
-                ("alex",  "Delete is the tricky one. Three cases: leaf, one child, two children."),
-                ("wei",   "Exactly. For two-children case, find the inorder successor (smallest in right subtree)."),
-                ("priya", "I keep forgetting to handle the two-child case in delete. Got a null pointer last night."),
-                ("sam",   "For inorder successor: go right once, then keep going left until null."),
-                ("alex",  "Also worth implementing a height() method and checking if the tree is balanced."),
-                ("wei",   "AVL trees handle balancing automatically with rotations. Out of scope for the assignment but good to know."),
+                (
+                    "wei",
+                    "Starting a thread on BST implementation. Key operations: insert, search, delete.",
+                ),
+                ("alex", "Delete is the tricky one. Three cases: leaf, one child, two children."),
+                (
+                    "wei",
+                    "Exactly. For two-children case, find the inorder successor (smallest in right subtree).",
+                ),
+                (
+                    "priya",
+                    "I keep forgetting to handle the two-child case in delete. Got a null pointer last night.",
+                ),
+                ("sam", "For inorder successor: go right once, then keep going left until null."),
+                (
+                    "alex",
+                    "Also worth implementing a height() method and checking if the tree is balanced.",
+                ),
+                (
+                    "wei",
+                    "AVL trees handle balancing automatically with rotations. Out of scope for the assignment but good to know.",
+                ),
                 ("priya", "What's the time complexity for BST operations?"),
-                ("alex",  "Average case: O(log n). Worst case (degenerate/skewed tree): O(n)."),
-                ("sam",   "That's why balanced trees matter — AVL, Red-Black, etc."),
-                ("wei",   "For the homework though, a plain BST is fine. Focus on correctness first."),
+                ("alex", "Average case: O(log n). Worst case (degenerate/skewed tree): O(n)."),
+                ("sam", "That's why balanced trees matter — AVL, Red-Black, etc."),
+                (
+                    "wei",
+                    "For the homework though, a plain BST is fine. Focus on correctness first.",
+                ),
                 ("priya", "Good advice. I'll get it working then optimize."),
-                ("alex",  "Also remember to handle duplicates — either reject or allow in right subtree."),
+                (
+                    "alex",
+                    "Also remember to handle duplicates — either reject or allow in right subtree.",
+                ),
             ],
             "web-dev": [
-                ("priya", "Side project question: should I use React or SvelteKit for my portfolio?"),
-                ("alex",  "SvelteKit all the way. Less boilerplate, faster, and the DX is amazing."),
-                ("sam",   "I switched from React to Svelte last year and don't miss it."),
-                ("wei",   "Svelte's reactivity model is simpler — no useState hooks, just $state()."),
+                (
+                    "priya",
+                    "Side project question: should I use React or SvelteKit for my portfolio?",
+                ),
+                ("alex", "SvelteKit all the way. Less boilerplate, faster, and the DX is amazing."),
+                ("sam", "I switched from React to Svelte last year and don't miss it."),
+                ("wei", "Svelte's reactivity model is simpler — no useState hooks, just $state()."),
                 ("priya", "Does SvelteKit do SSR out of the box?"),
-                ("alex",  "Yes! File-based routing, SSR, and static generation all built in."),
-                ("sam",   "The learning curve is gentler than Next.js too."),
-                ("wei",   "For a portfolio site I'd probably go static with `svelte-kit build` and deploy to Vercel."),
+                ("alex", "Yes! File-based routing, SSR, and static generation all built in."),
+                ("sam", "The learning curve is gentler than Next.js too."),
+                (
+                    "wei",
+                    "For a portfolio site I'd probably go static with `svelte-kit build` and deploy to Vercel.",
+                ),
                 ("priya", "Ok sold. SvelteKit it is. Any good tutorials?"),
-                ("alex",  "Official Svelte tutorial at learn.svelte.dev is excellent. Do the whole thing."),
-                ("sam",   "Also Joy of Code on YouTube has great Svelte content."),
-                ("wei",   "For styling, I like Tailwind with Svelte — works really well together."),
+                (
+                    "alex",
+                    "Official Svelte tutorial at learn.svelte.dev is excellent. Do the whole thing.",
+                ),
+                ("sam", "Also Joy of Code on YouTube has great Svelte content."),
+                ("wei", "For styling, I like Tailwind with Svelte — works really well together."),
                 ("priya", "Thanks team! Starting this weekend after we finish the BST assignment."),
             ],
             "help": [
-                ("sam",   "Debugging session: my BST search returns null for elements I know are in the tree."),
-                ("wei",   "Can you share your search code?"),
-                ("sam",   "function search(root, key) { if (!root) return null; if (key === root.val) return root; return search(root.left, key); }"),
-                ("alex",  "Found it! You're only recursing left. You need to check right too."),
-                ("sam",   "Oh no. Such a silly bug 😅"),
-                ("wei",   "Classic! Add: if (key < root.val) return search(root.left, key); else return search(root.right, key);"),
-                ("sam",   "Fixed! Tests pass now. Thank you!"),
-                ("priya", "I also had a question — how do I print the BST in inorder (sorted) sequence?"),
-                ("alex",  "Inorder traversal: left subtree, root, right subtree. Recursively."),
-                ("wei",   "function inorder(root) { if (!root) return; inorder(root.left); print(root.val); inorder(root.right); }"),
+                (
+                    "sam",
+                    "Debugging session: my BST search returns null for elements I know are in the tree.",
+                ),
+                ("wei", "Can you share your search code?"),
+                (
+                    "sam",
+                    "function search(root, key) { if (!root) return null; if (key === root.val) return root; return search(root.left, key); }",
+                ),
+                ("alex", "Found it! You're only recursing left. You need to check right too."),
+                ("sam", "Oh no. Such a silly bug 😅"),
+                (
+                    "wei",
+                    "Classic! Add: if (key < root.val) return search(root.left, key); else return search(root.right, key);",
+                ),
+                ("sam", "Fixed! Tests pass now. Thank you!"),
+                (
+                    "priya",
+                    "I also had a question — how do I print the BST in inorder (sorted) sequence?",
+                ),
+                ("alex", "Inorder traversal: left subtree, root, right subtree. Recursively."),
+                (
+                    "wei",
+                    "function inorder(root) { if (!root) return; inorder(root.left); print(root.val); inorder(root.right); }",
+                ),
                 ("priya", "Perfect, that gives sorted output since BST property is maintained."),
-                ("sam",   "Can confirm, this is the right approach. Tested it on mine."),
+                ("sam", "Can confirm, this is the right approach. Tested it on mine."),
             ],
         },
         "reactions": {
-            "general":    [("wei",   "🎉"), ("sam",   "👍")],
-            "algorithms": [("priya", "🔥"), ("alex",  "👍")],
-            "web-dev":    [("sam",   "🎉"), ("wei",   "👍")],
-            "help":       [("priya", "😂"), ("alex",  "🎉")],
+            "general": [("wei", "🎉"), ("sam", "👍")],
+            "algorithms": [("priya", "🔥"), ("alex", "👍")],
+            "web-dev": [("sam", "🎉"), ("wei", "👍")],
+            "help": [("priya", "😂"), ("alex", "🎉")],
         },
         "pins": {
-            "general":    0,
+            "general": 0,
             "algorithms": 1,
-            "web-dev":    0,
-            "help":       5,
+            "web-dev": 0,
+            "help": 5,
         },
     },
     {
@@ -202,80 +328,161 @@ GROUPS = [
         "members": ["nina", "priya", "jordan"],
         "channels": {
             "general": [
-                ("wei",   "Welcome to MCAT Prep NYC! Testing date accountability starts here."),
-                ("nina",  "I'm targeting the April exam. Anyone else?"),
+                ("wei", "Welcome to MCAT Prep NYC! Testing date accountability starts here."),
+                ("nina", "I'm targeting the April exam. Anyone else?"),
                 ("priya", "April too! When did you start prepping?"),
-                ("nina",  "About 3 months ago. Just got my FL1 score back — 506."),
-                ("wei",   "506 is a solid start. What sections need work?"),
-                ("nina",  "CARS is my weak spot. I keep running out of time."),
-                ("jordan","Same. CARS is brutal. I've been reading The Economist every day to practice."),
+                ("nina", "About 3 months ago. Just got my FL1 score back — 506."),
+                ("wei", "506 is a solid start. What sections need work?"),
+                ("nina", "CARS is my weak spot. I keep running out of time."),
+                (
+                    "jordan",
+                    "Same. CARS is brutal. I've been reading The Economist every day to practice.",
+                ),
                 ("priya", "The Economist tip is everywhere — does it actually help?"),
-                ("jordan","Yes! Dense academic prose with arguments you have to follow. Really trains active reading."),
-                ("wei",   "Also practice passage-mapping. Don't try to memorize, understand the argument structure."),
-                ("nina",  "I'll try daily Economist passages starting this week."),
-                ("priya", "What full-length practice tests are you all using? AAMC only or third party too?"),
-                ("wei",   "AAMC FLs are the gold standard. Save them for later prep. Use Blueprint or Kaplan FLs earlier."),
-                ("jordan","Agreed. I wasted an AAMC FL early on — keep them for the last 6 weeks."),
-                ("nina",  "Good tip. I have 4 Blueprint FLs left. That should cover early review."),
+                (
+                    "jordan",
+                    "Yes! Dense academic prose with arguments you have to follow. Really trains active reading.",
+                ),
+                (
+                    "wei",
+                    "Also practice passage-mapping. Don't try to memorize, understand the argument structure.",
+                ),
+                ("nina", "I'll try daily Economist passages starting this week."),
+                (
+                    "priya",
+                    "What full-length practice tests are you all using? AAMC only or third party too?",
+                ),
+                (
+                    "wei",
+                    "AAMC FLs are the gold standard. Save them for later prep. Use Blueprint or Kaplan FLs earlier.",
+                ),
+                (
+                    "jordan",
+                    "Agreed. I wasted an AAMC FL early on — keep them for the last 6 weeks.",
+                ),
+                ("nina", "Good tip. I have 4 Blueprint FLs left. That should cover early review."),
             ],
             "bio-biochem": [
                 ("priya", "Content review thread: amino acids. Who can name all 20?"),
-                ("wei",   "Mnemonic I use: 'Gly Ala Val Leu Ile Pro Phe Trp Met Ser Thr Cys Tyr Asn Gln Asp Glu Lys Arg His'"),
-                ("nina",  "Do we need to know pKa values for all of them?"),
-                ("wei",   "Know the charged ones at physiological pH (7.4): Asp (-), Glu (-), Lys (+), Arg (+), His (~neutral)."),
-                ("jordan","Enzyme kinetics is another big area. Michaelis-Menten?"),
-                ("priya", "Km = substrate concentration at half Vmax. Low Km = high enzyme affinity."),
-                ("wei",   "Competitive inhibitors increase apparent Km, don't change Vmax."),
-                ("nina",  "Noncompetitive inhibitors decrease Vmax, don't change Km."),
-                ("jordan","And uncompetitive inhibitors decrease both Km and Vmax."),
+                (
+                    "wei",
+                    "Mnemonic I use: 'Gly Ala Val Leu Ile Pro Phe Trp Met Ser Thr Cys Tyr Asn Gln Asp Glu Lys Arg His'",
+                ),
+                ("nina", "Do we need to know pKa values for all of them?"),
+                (
+                    "wei",
+                    "Know the charged ones at physiological pH (7.4): Asp (-), Glu (-), Lys (+), Arg (+), His (~neutral).",
+                ),
+                ("jordan", "Enzyme kinetics is another big area. Michaelis-Menten?"),
+                (
+                    "priya",
+                    "Km = substrate concentration at half Vmax. Low Km = high enzyme affinity.",
+                ),
+                ("wei", "Competitive inhibitors increase apparent Km, don't change Vmax."),
+                ("nina", "Noncompetitive inhibitors decrease Vmax, don't change Km."),
+                ("jordan", "And uncompetitive inhibitors decrease both Km and Vmax."),
                 ("priya", "I always mix up competitive and noncompetitive on practice questions."),
-                ("wei",   "Trick: competitive inhibitor competes with substrate — can be overcome with excess substrate, so Vmax unchanged."),
-                ("nina",  "That makes sense. Substrate wins out if there's enough of it."),
-                ("jordan","Also study cell signaling — GPCR, receptor tyrosine kinases, second messengers."),
-                ("priya", "cAMP, PKA, IP3/DAG, MAPK cascade. Got it. Anki has good decks for all of this."),
+                (
+                    "wei",
+                    "Trick: competitive inhibitor competes with substrate — can be overcome with excess substrate, so Vmax unchanged.",
+                ),
+                ("nina", "That makes sense. Substrate wins out if there's enough of it."),
+                (
+                    "jordan",
+                    "Also study cell signaling — GPCR, receptor tyrosine kinases, second messengers.",
+                ),
+                (
+                    "priya",
+                    "cAMP, PKA, IP3/DAG, MAPK cascade. Got it. Anki has good decks for all of this.",
+                ),
             ],
             "cars-verbal": [
-                ("jordan","Daily CARS practice thread. Post your score and one thing you learned."),
-                ("nina",  "Did 3 passages today, 9/12 correct. Missed 2 on philosophy passage — inference questions."),
+                (
+                    "jordan",
+                    "Daily CARS practice thread. Post your score and one thing you learned.",
+                ),
+                (
+                    "nina",
+                    "Did 3 passages today, 9/12 correct. Missed 2 on philosophy passage — inference questions.",
+                ),
                 ("priya", "Inference questions are hard. You have to stay close to the text."),
-                ("jordan","Rule for CARS: the answer is always supported by something in the passage. Don't bring outside knowledge."),
-                ("wei",   "That's the key insight. MCAT CARS tests reading comprehension, not your knowledge of the topic."),
-                ("nina",  "I keep getting drawn to answers that sound 'right' medically but aren't in the passage."),
-                ("jordan","Exactly the trap. The right answer might sound weird but is directly supported."),
-                ("priya", "Strategy: read the question stem first, then the passage, then eliminate answers not directly supported."),
-                ("wei",   "Also: look for the author's main argument and tone. Most questions relate to it."),
-                ("nina",  "The Economist reading is helping. Today's article was about central bank policy and I read every word."),
-                ("jordan","Great! Try timing yourself — 10 minutes per passage including questions is the target."),
+                (
+                    "jordan",
+                    "Rule for CARS: the answer is always supported by something in the passage. Don't bring outside knowledge.",
+                ),
+                (
+                    "wei",
+                    "That's the key insight. MCAT CARS tests reading comprehension, not your knowledge of the topic.",
+                ),
+                (
+                    "nina",
+                    "I keep getting drawn to answers that sound 'right' medically but aren't in the passage.",
+                ),
+                (
+                    "jordan",
+                    "Exactly the trap. The right answer might sound weird but is directly supported.",
+                ),
+                (
+                    "priya",
+                    "Strategy: read the question stem first, then the passage, then eliminate answers not directly supported.",
+                ),
+                (
+                    "wei",
+                    "Also: look for the author's main argument and tone. Most questions relate to it.",
+                ),
+                (
+                    "nina",
+                    "The Economist reading is helping. Today's article was about central bank policy and I read every word.",
+                ),
+                (
+                    "jordan",
+                    "Great! Try timing yourself — 10 minutes per passage including questions is the target.",
+                ),
                 ("priya", "I'm at 12-13 min per passage. Need to speed up."),
-                ("wei",   "Don't sacrifice accuracy for speed yet. Speed comes with practice. Focus on process first."),
+                (
+                    "wei",
+                    "Don't sacrifice accuracy for speed yet. Speed comes with practice. Focus on process first.",
+                ),
             ],
             "study-schedule": [
-                ("wei",   "Let's sync study schedules. What's everyone's daily hour commitment?"),
-                ("nina",  "I'm doing 3 hours on weekdays, 6 on weekends."),
+                ("wei", "Let's sync study schedules. What's everyone's daily hour commitment?"),
+                ("nina", "I'm doing 3 hours on weekdays, 6 on weekends."),
                 ("priya", "Similar — 2-3 hrs/day. More on weekends."),
-                ("jordan","I'm doing 4 hrs/day total: 2 content review, 1 practice questions, 1 review."),
-                ("wei",   "Good structure. Question-first then review is more efficient than passive reading."),
-                ("nina",  "I've been doing passive reading which probably explains my plateau."),
-                ("priya", "Active recall is key — Anki is perfect for this. I do 200-300 new cards/day."),
-                ("jordan","I use the AnKing deck for MCAT. Massive but very comprehensive."),
-                ("wei",   "AnKing is great. Filter by tag for the section you're reviewing."),
-                ("nina",  "I'll set up Anki this week. How many reviews per day do you all manage?"),
-                ("jordan","I do new + reviews in one session. About 45 min total."),
+                (
+                    "jordan",
+                    "I'm doing 4 hrs/day total: 2 content review, 1 practice questions, 1 review.",
+                ),
+                (
+                    "wei",
+                    "Good structure. Question-first then review is more efficient than passive reading.",
+                ),
+                ("nina", "I've been doing passive reading which probably explains my plateau."),
+                (
+                    "priya",
+                    "Active recall is key — Anki is perfect for this. I do 200-300 new cards/day.",
+                ),
+                ("jordan", "I use the AnKing deck for MCAT. Massive but very comprehensive."),
+                ("wei", "AnKing is great. Filter by tag for the section you're reviewing."),
+                ("nina", "I'll set up Anki this week. How many reviews per day do you all manage?"),
+                ("jordan", "I do new + reviews in one session. About 45 min total."),
                 ("priya", "Full length tests every 2 weeks, content review in between."),
-                ("wei",   "Let's do a group FL debrief after each test? We can share what we got wrong."),
-                ("nina",  "Yes! Accountability and shared learning. I'm in."),
+                (
+                    "wei",
+                    "Let's do a group FL debrief after each test? We can share what we got wrong.",
+                ),
+                ("nina", "Yes! Accountability and shared learning. I'm in."),
             ],
         },
         "reactions": {
-            "general":        [("priya", "👍"), ("jordan", "🎉")],
-            "bio-biochem":    [("nina",  "🔥"), ("wei",    "👍")],
-            "cars-verbal":    [("jordan","👍"), ("nina",   "🎉")],
-            "study-schedule": [("priya", "🔥"), ("wei",    "👍")],
+            "general": [("priya", "👍"), ("jordan", "🎉")],
+            "bio-biochem": [("nina", "🔥"), ("wei", "👍")],
+            "cars-verbal": [("jordan", "👍"), ("nina", "🎉")],
+            "study-schedule": [("priya", "🔥"), ("wei", "👍")],
         },
         "pins": {
-            "general":        0,
-            "bio-biochem":    1,
-            "cars-verbal":    2,
+            "general": 0,
+            "bio-biochem": 1,
+            "cars-verbal": 2,
             "study-schedule": 4,
         },
     },
@@ -288,77 +495,167 @@ GROUPS = [
         "members": ["oliver", "maya", "sam"],
         "channels": {
             "general": [
-                ("nina",   "Welcome everyone! Intermediate Macro is finally getting interesting."),
+                ("nina", "Welcome everyone! Intermediate Macro is finally getting interesting."),
                 ("oliver", "The IS-LM model threw me off at first but it's starting to click."),
-                ("maya",   "Same. Once you understand what shifts each curve it makes more sense."),
-                ("sam",    "The problem sets are intense. PS3 question 2 took me an hour."),
-                ("nina",   "Which question was that?"),
-                ("sam",    "The one where fiscal policy is used in a liquidity trap. Spoiler: IS shifts right but LM is flat."),
-                ("oliver", "So output increases but interest rates don't rise. Fiscal policy is effective in a trap."),
-                ("maya",   "Right! That's actually the Keynesian argument for stimulus during recessions."),
-                ("nina",   "The 2008 crisis is a good real-world case. Fed hit zero lower bound, IS shifted left."),
+                ("maya", "Same. Once you understand what shifts each curve it makes more sense."),
+                ("sam", "The problem sets are intense. PS3 question 2 took me an hour."),
+                ("nina", "Which question was that?"),
+                (
+                    "sam",
+                    "The one where fiscal policy is used in a liquidity trap. Spoiler: IS shifts right but LM is flat.",
+                ),
+                (
+                    "oliver",
+                    "So output increases but interest rates don't rise. Fiscal policy is effective in a trap.",
+                ),
+                (
+                    "maya",
+                    "Right! That's actually the Keynesian argument for stimulus during recessions.",
+                ),
+                (
+                    "nina",
+                    "The 2008 crisis is a good real-world case. Fed hit zero lower bound, IS shifted left.",
+                ),
                 ("oliver", "And the stimulus packages were trying to shift IS back right."),
-                ("sam",    "Study session this week? I need help with the exchange rate extensions."),
-                ("maya",   "Thursday works. We can tackle the Mundell-Fleming model too."),
-                ("nina",   "Perfect. I'll grab a Uris library room."),
+                ("sam", "Study session this week? I need help with the exchange rate extensions."),
+                ("maya", "Thursday works. We can tackle the Mundell-Fleming model too."),
+                ("nina", "Perfect. I'll grab a Uris library room."),
             ],
             "is-lm-models": [
-                ("oliver", "IS-LM review: IS curve = goods market equilibrium. LM = money market equilibrium."),
-                ("maya",   "IS curve slopes downward: higher r → lower investment → lower output."),
-                ("nina",   "LM curve slopes upward: higher Y → higher money demand → higher r."),
-                ("sam",    "What shifts the IS curve?"),
-                ("oliver", "IS shifts right: fiscal expansion (G↑ or T↓), consumer/investor confidence ↑, net exports ↑."),
-                ("maya",   "IS shifts left: fiscal contraction, confidence ↓, trade deficit worsening."),
-                ("sam",    "And LM curve?"),
-                ("nina",   "LM shifts right: money supply increases (Fed buys bonds). LM shifts left: money supply decreases."),
-                ("oliver", "Equilibrium is where IS and LM intersect — gives equilibrium output (Y) and interest rate (r)."),
-                ("maya",   "Crowding out effect: fiscal expansion shifts IS right, raises r, reduces private investment."),
-                ("sam",    "So the multiplier is less than the simple Keynesian model suggests."),
-                ("nina",   "Exactly. Higher r partially offsets the fiscal stimulus through investment crowding out."),
-                ("oliver", "Unless we're in a liquidity trap — then LM is horizontal and no crowding out."),
+                (
+                    "oliver",
+                    "IS-LM review: IS curve = goods market equilibrium. LM = money market equilibrium.",
+                ),
+                ("maya", "IS curve slopes downward: higher r → lower investment → lower output."),
+                ("nina", "LM curve slopes upward: higher Y → higher money demand → higher r."),
+                ("sam", "What shifts the IS curve?"),
+                (
+                    "oliver",
+                    "IS shifts right: fiscal expansion (G↑ or T↓), consumer/investor confidence ↑, net exports ↑.",
+                ),
+                (
+                    "maya",
+                    "IS shifts left: fiscal contraction, confidence ↓, trade deficit worsening.",
+                ),
+                ("sam", "And LM curve?"),
+                (
+                    "nina",
+                    "LM shifts right: money supply increases (Fed buys bonds). LM shifts left: money supply decreases.",
+                ),
+                (
+                    "oliver",
+                    "Equilibrium is where IS and LM intersect — gives equilibrium output (Y) and interest rate (r).",
+                ),
+                (
+                    "maya",
+                    "Crowding out effect: fiscal expansion shifts IS right, raises r, reduces private investment.",
+                ),
+                ("sam", "So the multiplier is less than the simple Keynesian model suggests."),
+                (
+                    "nina",
+                    "Exactly. Higher r partially offsets the fiscal stimulus through investment crowding out.",
+                ),
+                (
+                    "oliver",
+                    "Unless we're in a liquidity trap — then LM is horizontal and no crowding out.",
+                ),
             ],
             "current-events": [
-                ("sam",    "How do the current Fed rate hikes fit into IS-LM?"),
-                ("maya",   "Rate hikes = contractionary monetary policy = LM shifts left = higher r, lower Y."),
-                ("nina",   "The goal is to reduce Y to bring inflation down via the AD curve."),
+                ("sam", "How do the current Fed rate hikes fit into IS-LM?"),
+                (
+                    "maya",
+                    "Rate hikes = contractionary monetary policy = LM shifts left = higher r, lower Y.",
+                ),
+                ("nina", "The goal is to reduce Y to bring inflation down via the AD curve."),
                 ("oliver", "But it risks a recession if LM shifts too far left."),
-                ("sam",    "The 'soft landing' debate — can the Fed reduce inflation without crashing output?"),
-                ("maya",   "Historically it's very hard. 1981 Volcker disinflation caused a deep recession."),
-                ("nina",   "Recent inflation looks supply-side too — oil shocks, supply chain. IS-LM doesn't capture that well."),
-                ("oliver", "That's where AS-AD comes in. Supply shocks shift SRAS left: stagflation."),
-                ("sam",    "Policy dilemma: if it's a supply shock, raising rates fights inflation but worsens output."),
-                ("maya",   "Prof. Harrington talked about this — no good policy tool for stagflation."),
-                ("nina",   "It's why the 1970s were so painful. Double-digit inflation and high unemployment."),
-                ("oliver", "Modern monetary economists argue the models need updating for supply-side dynamics."),
+                (
+                    "sam",
+                    "The 'soft landing' debate — can the Fed reduce inflation without crashing output?",
+                ),
+                (
+                    "maya",
+                    "Historically it's very hard. 1981 Volcker disinflation caused a deep recession.",
+                ),
+                (
+                    "nina",
+                    "Recent inflation looks supply-side too — oil shocks, supply chain. IS-LM doesn't capture that well.",
+                ),
+                (
+                    "oliver",
+                    "That's where AS-AD comes in. Supply shocks shift SRAS left: stagflation.",
+                ),
+                (
+                    "sam",
+                    "Policy dilemma: if it's a supply shock, raising rates fights inflation but worsens output.",
+                ),
+                (
+                    "maya",
+                    "Prof. Harrington talked about this — no good policy tool for stagflation.",
+                ),
+                (
+                    "nina",
+                    "It's why the 1970s were so painful. Double-digit inflation and high unemployment.",
+                ),
+                (
+                    "oliver",
+                    "Modern monetary economists argue the models need updating for supply-side dynamics.",
+                ),
             ],
             "problem-sets": [
-                ("sam",    "PS3 help thread. Question 4: 'Fiscal expansion under fixed exchange rate.' Where to start?"),
+                (
+                    "sam",
+                    "PS3 help thread. Question 4: 'Fiscal expansion under fixed exchange rate.' Where to start?",
+                ),
                 ("oliver", "That's Mundell-Fleming. Fixed exchange rate = BP curve is horizontal."),
-                ("maya",   "With fixed exchange rates, monetary policy is ineffective. Fiscal policy is fully effective."),
-                ("nina",   "Because: fiscal expansion shifts IS right → r tends to rise → capital inflows → currency appreciates → central bank buys foreign currency to maintain peg → money supply expands → LM shifts right."),
-                ("sam",    "Oh so the LM adjustment happens automatically to maintain the peg."),
-                ("oliver", "Exactly. Fiscal multiplier is 1/MPC in closed economy but larger in open with fixed rate."),
-                ("maya",   "PS3 question 6: 'Derive the IS curve from goods market equilibrium.' Anyone done it?"),
-                ("nina",   "Start from Y = C + I + G + NX. Substitute consumption function and investment function."),
-                ("sam",    "C = a + b(Y-T), I = d - er. Substitute: Y = a + b(Y-T) + d - er + G + NX."),
+                (
+                    "maya",
+                    "With fixed exchange rates, monetary policy is ineffective. Fiscal policy is fully effective.",
+                ),
+                (
+                    "nina",
+                    "Because: fiscal expansion shifts IS right → r tends to rise → capital inflows → currency appreciates → central bank buys foreign currency to maintain peg → money supply expands → LM shifts right.",
+                ),
+                ("sam", "Oh so the LM adjustment happens automatically to maintain the peg."),
+                (
+                    "oliver",
+                    "Exactly. Fiscal multiplier is 1/MPC in closed economy but larger in open with fixed rate.",
+                ),
+                (
+                    "maya",
+                    "PS3 question 6: 'Derive the IS curve from goods market equilibrium.' Anyone done it?",
+                ),
+                (
+                    "nina",
+                    "Start from Y = C + I + G + NX. Substitute consumption function and investment function.",
+                ),
+                (
+                    "sam",
+                    "C = a + b(Y-T), I = d - er. Substitute: Y = a + b(Y-T) + d - er + G + NX.",
+                ),
                 ("oliver", "Solve for r: r = [a + bY - bT + d + G + NX - Y(1-b)] / e."),
-                ("maya",   "That gives r as a decreasing function of Y — the downward-sloping IS curve."),
-                ("nina",   "PS4 is due Friday. Who wants to start a session Wednesday evening?"),
-                ("sam",    "Wednesday 7pm works for me. Zoom or in person?"),
-                ("oliver", "Let's do Zoom. I'll share my screen and we can work through it together."),
+                (
+                    "maya",
+                    "That gives r as a decreasing function of Y — the downward-sloping IS curve.",
+                ),
+                ("nina", "PS4 is due Friday. Who wants to start a session Wednesday evening?"),
+                ("sam", "Wednesday 7pm works for me. Zoom or in person?"),
+                (
+                    "oliver",
+                    "Let's do Zoom. I'll share my screen and we can work through it together.",
+                ),
             ],
         },
         "reactions": {
-            "general":        [("oliver", "👍"), ("maya",  "🎉")],
-            "is-lm-models":   [("sam",    "🔥"), ("nina",  "👍")],
-            "current-events": [("maya",   "😮"), ("oliver","👍")],
-            "problem-sets":   [("nina",   "🎉"), ("sam",   "👍")],
+            "general": [("oliver", "👍"), ("maya", "🎉")],
+            "is-lm-models": [("sam", "🔥"), ("nina", "👍")],
+            "current-events": [("maya", "😮"), ("oliver", "👍")],
+            "problem-sets": [("nina", "🎉"), ("sam", "👍")],
         },
         "pins": {
-            "general":        0,
-            "is-lm-models":   0,
+            "general": 0,
+            "is-lm-models": 0,
             "current-events": 2,
-            "problem-sets":   1,
+            "problem-sets": 1,
         },
     },
     {
@@ -371,93 +668,201 @@ GROUPS = [
         "channels": {
             "general": [
                 ("oliver", "Welcome to the Hunter Philosophy Circle! Glad we're doing this."),
-                ("zara",   "I've been wanting a philosophy discussion group forever. PHIL 101 doesn't go deep enough."),
-                ("maya",   "Agreed. The textbook readings are interesting but class goes so fast."),
+                (
+                    "zara",
+                    "I've been wanting a philosophy discussion group forever. PHIL 101 doesn't go deep enough.",
+                ),
+                ("maya", "Agreed. The textbook readings are interesting but class goes so fast."),
                 ("jordan", "What's everyone's philosophical background? I'm pretty new to this."),
                 ("oliver", "I've taken a few classes. Really into philosophy of mind lately."),
-                ("zara",   "I came in through ethics — started reading Peter Singer and couldn't stop."),
-                ("maya",   "I got hooked by Descartes' Meditations. The cogito blew my mind."),
+                (
+                    "zara",
+                    "I came in through ethics — started reading Peter Singer and couldn't stop.",
+                ),
+                ("maya", "I got hooked by Descartes' Meditations. The cogito blew my mind."),
                 ("jordan", "Cogito ergo sum — I think therefore I am. We covered that in class."),
-                ("oliver", "The cogito is actually more subtle than it first appears. Worth discussing!"),
-                ("zara",   "Let's do a reading each week and discuss. Start with something accessible."),
-                ("maya",   "Plato's Allegory of the Cave? Or something more contemporary?"),
+                (
+                    "oliver",
+                    "The cogito is actually more subtle than it first appears. Worth discussing!",
+                ),
+                (
+                    "zara",
+                    "Let's do a reading each week and discuss. Start with something accessible.",
+                ),
+                ("maya", "Plato's Allegory of the Cave? Or something more contemporary?"),
                 ("oliver", "Let's do the Cave this week, then move to something modern next week."),
                 ("jordan", "I'll re-read it tonight. The prisoners and shadows thing."),
-                ("zara",   "The Cave is so good. Plato packing so much epistemology into a story."),
+                ("zara", "The Cave is so good. Plato packing so much epistemology into a story."),
             ],
             "ethics": [
-                ("zara",   "Ethics thread! Let's start with the trolley problem."),
-                ("maya",   "Classic. Utilitarian says pull the lever — save 5 at the cost of 1."),
-                ("jordan", "But the footbridge variant is interesting — push a man off a bridge to stop the trolley."),
+                ("zara", "Ethics thread! Let's start with the trolley problem."),
+                ("maya", "Classic. Utilitarian says pull the lever — save 5 at the cost of 1."),
+                (
+                    "jordan",
+                    "But the footbridge variant is interesting — push a man off a bridge to stop the trolley.",
+                ),
                 ("oliver", "Same utilitarian calculus but most people feel differently about it."),
-                ("zara",   "That's Judith Thomson's point. The means matter, not just the ends."),
-                ("maya",   "Kantian ethics would say you can't use someone as a mere means — don't push."),
-                ("jordan", "What about Singer's drowning child argument? You're walking past a pond, child drowning."),
-                ("zara",   "Singer says you're obligated to save the child even at significant personal cost."),
-                ("oliver", "And the implication extends to global poverty — we're all 'walking past the drowning child'."),
-                ("maya",   "But most people resist that conclusion. Does proximity matter morally?"),
-                ("zara",   "Singer says no — suffering is suffering regardless of distance. Hard to argue against."),
-                ("jordan", "Yet almost no one acts consistently on Singer's principle. What does that say?"),
-                ("oliver", "Bernard Williams said utilitarianism alienates us from our 'ground projects' — the things that give our lives meaning."),
-                ("maya",   "So there's a tension between impartial morality and personal integrity. Deep stuff."),
-                ("zara",   "For next week: let's read Thomson's 'Violinist' argument about bodily autonomy."),
+                ("zara", "That's Judith Thomson's point. The means matter, not just the ends."),
+                (
+                    "maya",
+                    "Kantian ethics would say you can't use someone as a mere means — don't push.",
+                ),
+                (
+                    "jordan",
+                    "What about Singer's drowning child argument? You're walking past a pond, child drowning.",
+                ),
+                (
+                    "zara",
+                    "Singer says you're obligated to save the child even at significant personal cost.",
+                ),
+                (
+                    "oliver",
+                    "And the implication extends to global poverty — we're all 'walking past the drowning child'.",
+                ),
+                ("maya", "But most people resist that conclusion. Does proximity matter morally?"),
+                (
+                    "zara",
+                    "Singer says no — suffering is suffering regardless of distance. Hard to argue against.",
+                ),
+                (
+                    "jordan",
+                    "Yet almost no one acts consistently on Singer's principle. What does that say?",
+                ),
+                (
+                    "oliver",
+                    "Bernard Williams said utilitarianism alienates us from our 'ground projects' — the things that give our lives meaning.",
+                ),
+                (
+                    "maya",
+                    "So there's a tension between impartial morality and personal integrity. Deep stuff.",
+                ),
+                (
+                    "zara",
+                    "For next week: let's read Thomson's 'Violinist' argument about bodily autonomy.",
+                ),
             ],
             "epistemology": [
                 ("oliver", "Epistemology time! Starting point: what can we actually know?"),
-                ("maya",   "Descartes in Meditation I: doubt everything. Senses can deceive, we might be dreaming."),
-                ("zara",   "The evil demon hypothesis — an all-powerful deceiver could make us believe falsehoods."),
+                (
+                    "maya",
+                    "Descartes in Meditation I: doubt everything. Senses can deceive, we might be dreaming.",
+                ),
+                (
+                    "zara",
+                    "The evil demon hypothesis — an all-powerful deceiver could make us believe falsehoods.",
+                ),
                 ("jordan", "That sounds like the Matrix. Were they inspired by Descartes?"),
-                ("oliver", "The Wachowskis definitely drew on Descartes and Baudrillard's Simulacra."),
-                ("maya",   "And then the cogito: even if I'm deceived, the act of thinking proves I exist."),
-                ("zara",   "Descartes uses this to rebuild knowledge from scratch — a foundationalist approach."),
-                ("oliver", "But Hume later attacks the foundations. Induction can't be justified without circular reasoning."),
-                ("jordan", "The problem of induction — just because the sun rose every day doesn't prove it will rise tomorrow."),
-                ("maya",   "Hume's skepticism is more radical than Descartes'. No bedrock certainty at all?"),
-                ("zara",   "Kant's response: we impose structure on experience. Space, time, causality are frameworks we bring."),
-                ("oliver", "Ship of Theseus fits here too — is it the same ship after every plank is replaced?"),
-                ("maya",   "Leibniz's Law: two things are identical iff they share all properties. The new ship differs."),
-                ("jordan", "But we call it the same ship by convention. Parfit's personal identity work extends this."),
-                ("zara",   "Parfit's Reasons and Persons: personal identity might not be what matters for survival."),
-                ("oliver", "The teleportation thought experiment — if you're disassembled and reassembled, is it you?"),
-                ("maya",   "Psychological continuity theory says yes, if memories and personality are preserved."),
+                (
+                    "oliver",
+                    "The Wachowskis definitely drew on Descartes and Baudrillard's Simulacra.",
+                ),
+                (
+                    "maya",
+                    "And then the cogito: even if I'm deceived, the act of thinking proves I exist.",
+                ),
+                (
+                    "zara",
+                    "Descartes uses this to rebuild knowledge from scratch — a foundationalist approach.",
+                ),
+                (
+                    "oliver",
+                    "But Hume later attacks the foundations. Induction can't be justified without circular reasoning.",
+                ),
+                (
+                    "jordan",
+                    "The problem of induction — just because the sun rose every day doesn't prove it will rise tomorrow.",
+                ),
+                (
+                    "maya",
+                    "Hume's skepticism is more radical than Descartes'. No bedrock certainty at all?",
+                ),
+                (
+                    "zara",
+                    "Kant's response: we impose structure on experience. Space, time, causality are frameworks we bring.",
+                ),
+                (
+                    "oliver",
+                    "Ship of Theseus fits here too — is it the same ship after every plank is replaced?",
+                ),
+                (
+                    "maya",
+                    "Leibniz's Law: two things are identical iff they share all properties. The new ship differs.",
+                ),
+                (
+                    "jordan",
+                    "But we call it the same ship by convention. Parfit's personal identity work extends this.",
+                ),
+                (
+                    "zara",
+                    "Parfit's Reasons and Persons: personal identity might not be what matters for survival.",
+                ),
+                (
+                    "oliver",
+                    "The teleportation thought experiment — if you're disassembled and reassembled, is it you?",
+                ),
+                (
+                    "maya",
+                    "Psychological continuity theory says yes, if memories and personality are preserved.",
+                ),
             ],
         },
         "reactions": {
-            "general":     [("zara",   "🎉"), ("maya",  "👍")],
-            "ethics":      [("jordan", "😮"), ("oliver","🔥")],
-            "epistemology":[("maya",   "🔥"), ("zara",  "😮")],
+            "general": [("zara", "🎉"), ("maya", "👍")],
+            "ethics": [("jordan", "😮"), ("oliver", "🔥")],
+            "epistemology": [("maya", "🔥"), ("zara", "😮")],
         },
         "pins": {
-            "general":      0,
-            "ethics":       4,
+            "general": 0,
+            "ethics": 4,
             "epistemology": 0,
         },
     },
 ]
 
-USER_DMS = [
+USER_DMS: list[DirectMessageSpec] = [
     {
         "from": "maya",
-        "to":   "jordan",
+        "to": "jordan",
         "messages": [
-            ("maya",   "Hey Jordan! Are we still on for the calc study session Thursday?"),
-            ("jordan", "Definitely! I was going to review related rates beforehand. Should I bring practice problems?"),
-            ("maya",   "Yes please! Bring the ones from chapter 4. I'll bring my notes from Prof. Kim's office hours."),
+            ("maya", "Hey Jordan! Are we still on for the calc study session Thursday?"),
+            (
+                "jordan",
+                "Definitely! I was going to review related rates beforehand. Should I bring practice problems?",
+            ),
+            (
+                "maya",
+                "Yes please! Bring the ones from chapter 4. I'll bring my notes from Prof. Kim's office hours.",
+            ),
             ("jordan", "Perfect. Should we grab food first or start at 6 sharp?"),
-            ("maya",   "Let's aim for 6pm sharp — I have to catch the A train back by 10."),
+            ("maya", "Let's aim for 6pm sharp — I have to catch the A train back by 10."),
             ("jordan", "Works for me. See you at Bobst! I'll grab a coffee on the way."),
         ],
     },
     {
         "from": "alex",
-        "to":   "priya",
+        "to": "priya",
         "messages": [
-            ("alex",  "Hey Priya, did you push your BST implementation to the shared repo?"),
-            ("priya", "Just pushed it! Branch is called 'bst-priya'. The delete method needs review."),
-            ("alex",  "Looking at it now. Your two-children case looks good but the inorder successor search has a small off-by-one."),
-            ("priya", "Ah I see it — I return current instead of current.left at the end. Fix pushed."),
-            ("alex",  "Perfect! All tests pass now. We should combine our implementations for the final project."),
-            ("priya", "Agreed. Let's sync Saturday after the group call and write the merge sort extension together."),
+            ("alex", "Hey Priya, did you push your BST implementation to the shared repo?"),
+            (
+                "priya",
+                "Just pushed it! Branch is called 'bst-priya'. The delete method needs review.",
+            ),
+            (
+                "alex",
+                "Looking at it now. Your two-children case looks good but the inorder successor search has a small off-by-one.",
+            ),
+            (
+                "priya",
+                "Ah I see it — I return current instead of current.left at the end. Fix pushed.",
+            ),
+            (
+                "alex",
+                "Perfect! All tests pass now. We should combine our implementations for the final project.",
+            ),
+            (
+                "priya",
+                "Agreed. Let's sync Saturday after the group call and write the merge sort extension together.",
+            ),
         ],
     },
 ]
@@ -468,6 +873,11 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser) -> None:
         parser.add_argument("--guest-community", type=int)
+        parser.add_argument(
+            "--demo-channel",
+            type=int,
+            help="Add a sample study conversation to this local channel.",
+        )
 
     @transaction.atomic
     def handle(self, *args, **options) -> None:
@@ -565,6 +975,40 @@ class Command(BaseCommand):
                     sender_key=sender_account_key,
                     content=content,
                     defaults={"author_name": PEOPLE[sender_key]},
+                )
+
+        if options["demo_channel"] is not None:
+            channel = Channel.objects.filter(pk=options["demo_channel"]).first()
+            if channel is None:
+                raise CommandError("Choose an existing demo channel.")
+            if not channel.topic:
+                channel.topic = "Study plans, library meetups, and a little accountability."
+                channel.save(update_fields=["topic"])
+            for handle, content in (
+                (
+                    "maya",
+                    "I grabbed a table on the second floor of Bobst. Anyone joining for the 4 pm study session?",
+                ),
+                ("jordan", "On my way! I printed a few extra copies of the practice set."),
+                (
+                    "priya",
+                    "Count me in. Can we start with question 6? The last step is still throwing me.",
+                ),
+                ("maya", "Absolutely. Look for the table by the windows 📚"),
+            ):
+                Membership.objects.get_or_create(community=channel.community, user=users[handle])
+                Message.objects.get_or_create(
+                    channel=channel,
+                    author=users[handle],
+                    content=content,
+                    defaults={"author_name": PEOPLE[handle]},
+                )
+            # Refresh legacy guest labels in this explicitly selected local demo.
+            for identity in (
+                channel.messages.exclude(guest_id="").values_list("guest_id", flat=True).distinct()
+            ):
+                channel.messages.filter(guest_id=identity, author_name__startswith="Guest ").update(
+                    author_name=guest_name(identity)
                 )
 
         # Guest community DM seeding

@@ -7,9 +7,8 @@ from rest_framework.test import APIClient
 pytestmark = pytest.mark.django_db
 
 
-def test_two_guests_can_start_and_exchange_private_messages():
-    first = APIClient()
-    community_id = first.post("/communities", {"name": "Calculus"}).data["id"]
+def test_two_guests_can_start_and_exchange_private_messages(existing_guest_community):
+    first, community_id = existing_guest_community
     channel_id = first.get(f"/communities/{community_id}").data["channels"][0]["id"]
     second = APIClient()
     assert second.post(f"/communities/{community_id}/join").status_code == 200
@@ -37,9 +36,8 @@ def test_two_guests_can_start_and_exchange_private_messages():
     assert second.get(messages).data["items"][0]["deleted_at"] is not None
 
 
-def test_guest_can_start_dm_with_account_member():
-    owner = APIClient()
-    community_id = owner.post("/communities", {"name": "Physics"}).data["id"]
+def test_guest_can_start_dm_with_account_member(existing_guest_community):
+    owner, community_id = existing_guest_community
     user = get_user_model().objects.create_user(username="student", password="test-password")
     account = APIClient()
     account.force_authenticate(user=user)
@@ -50,9 +48,8 @@ def test_guest_can_start_dm_with_account_member():
     assert account.post(f"/dms/{started.data['id']}/messages", {"content": "Hi"}).status_code == 201
 
 
-def test_member_list_includes_guests_and_can_start_private_conversation():
-    owner = APIClient()
-    community_id = owner.post("/communities", {"name": "Chemistry"}).data["id"]
+def test_member_list_includes_guests_and_can_start_private_conversation(existing_guest_community):
+    owner, community_id = existing_guest_community
     second = APIClient()
     assert second.post(f"/communities/{community_id}/join").status_code == 200
 
@@ -68,3 +65,18 @@ def test_member_list_includes_guests_and_can_start_private_conversation():
     started = owner.post(f"/communities/{community_id}/dms", {"guest_member_id": other["id"]})
     assert started.status_code == 201
     assert second.get("/dms").data["items"][0]["id"] == started.data["id"]
+
+
+def test_people_search_returns_only_other_shared_members(existing_guest_community):
+    owner, community_id = existing_guest_community
+    user = get_user_model().objects.create_user(username="MayaChen")
+    member = APIClient()
+    member.force_authenticate(user=user)
+    path = "/chat/people?q=AYA"
+    assert owner.get(path).data["items"] == []
+    member.post(f"/communities/{community_id}/join")
+    [person] = owner.get(path).data["items"]
+    assert person["name"] == "MayaChen"
+    assert owner.post(f"/communities/{community_id}/dms", person["target"]).status_code == 201
+    assert member.get(path).data["items"] == []
+    assert APIClient().get(path).data["items"] == []

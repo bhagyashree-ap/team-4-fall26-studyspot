@@ -1,4 +1,5 @@
 <script lang="ts">
+	import * as Card from '$lib/components/ui/card';
 	import { resolve } from '$app/paths';
 	import SiteHeader from './SiteHeader.svelte';
 	import SignUpForm from './SignUpForm.svelte';
@@ -22,7 +23,7 @@
 	<SiteHeader {session} />
 
 	<main aria-live="polite">
-		<section class="panel" aria-labelledby="sign-up-title">
+		<Card.Root role="region" class="panel" aria-labelledby="sign-up-title">
 			{#if session.status === 'disabled'}
 				<p class="eyebrow">Accounts</p>
 				<h1 id="sign-up-title">Sign-up is not open yet.</h1>
@@ -54,7 +55,7 @@
 					</button>
 				</p>
 			{/if}
-		</section>
+		</Card.Root>
 	</main>
 </div>
 
@@ -69,7 +70,7 @@
 		margin: 0 auto;
 	}
 
-	.panel {
+	.page :global(.panel) {
 		display: flex;
 		flex-direction: column;
 		align-items: center;
@@ -147,7 +148,7 @@
 			padding: 0 12px 15px;
 		}
 
-		.panel {
+		.page :global(.panel) {
 			padding: 40px 16px 48px;
 			border-radius: 24px;
 		}

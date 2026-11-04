@@ -54,9 +54,18 @@ infra-check:
     {{tf}} fmt -check -recursive
     {{tf}} validate
 
+# The basemap behind the map view has no copy on disk -- it is a 31 MB archive
+# in the site bucket, deployed by `just aws-tiles` -- so `/tiles` is proxied to
+# the deployed site to draw a map locally. The URL comes from Terraform where
+# the state is at hand, and can be given directly where it is not:
+#
+#     TILES_PROXY_TARGET=https://… just dev-frontend
+#
+# Unset, the proxy is left off and everything except the maps works as before.
+
 # Start the frontend development server.
 dev-frontend:
-    cd src/frontend && bun run dev -- --host 127.0.0.1 --port 7500
+    TILES_PROXY_TARGET="${TILES_PROXY_TARGET:-$({{tf}} output -raw site_url 2>/dev/null || true)}" bash -c 'cd src/frontend && bun run dev -- --host 127.0.0.1 --port 7500'
 
 # Start the backend development server. Needs Postgres: `just start-db`.
 dev-backend:
@@ -150,10 +159,6 @@ format:
 docs:
     uv run --project docs sphinx-build --builder html docs/source docs/build/html
     python3.12 -m http.server 7503 --bind 127.0.0.1 --directory docs/build/html
-
-# Validate the Nix development environment.
-nix-check:
-    nix --extra-experimental-features "nix-command flakes" flake check --print-build-logs
 
 # -- AWS ----------------------------------------------------------------------
 #

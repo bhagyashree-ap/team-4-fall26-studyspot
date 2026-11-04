@@ -1,9 +1,9 @@
 """Public discovery and session-backed community management."""
 
-import hashlib
 import secrets
 from datetime import datetime
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
@@ -21,6 +21,7 @@ from rest_framework.views import APIView
 from accounts.authentication import Auth0Authentication
 
 from . import services
+from .guest_names import guest_name
 from .models import Ban, Channel, Community, GuestMembership, Invite, Membership, ModerationEvent
 from .permissions import Action, GuestMember, GuestOwner, require, role_for
 from .serializers import (
@@ -48,6 +49,11 @@ class CommunitySessionAuthentication(SessionAuthentication):
 
 class CommunityView(APIView):
     authentication_classes = [Auth0Authentication, CommunitySessionAuthentication]
+
+    def check_permissions(self, request: Request) -> None:
+        super().check_permissions(request)
+        if not settings.CHAT_GUEST_DEMO:
+            actor(request)
 
 
 def actor(request: Request):
@@ -85,6 +91,8 @@ def counted_communities():
 
 
 def viewer(request: Request, community: Community):
+    if not settings.CHAT_GUEST_DEMO or getattr(request.user, "is_authenticated", False):
+        return request.user
     if community.owner_id is None and community.pk in request.session.get("guest_communities", []):
         return GuestOwner(community.pk)
     if not getattr(request.user, "is_authenticated", False):
@@ -132,9 +140,19 @@ def page(request: Request) -> tuple[int, int]:
     return parsed.validated_data["limit"], parsed.validated_data["offset"]
 
 
+class CommunityAccess(APIView):
+    authentication_classes = [Auth0Authentication, CommunitySessionAuthentication]
+
+    def get(self, request: Request) -> Response:
+        # First-time invite recipients need a CSRF cookie before redeeming.
+        get_token(request._request)
+        return Response({"guest_preview": settings.CHAT_GUEST_DEMO})
+
+
 class CommunityList(CommunityView):
     def get(self, request: Request) -> Response:
-        actor(request)
+        if not settings.CHAT_GUEST_DEMO or request.user:
+            actor(request)
         get_token(request._request)
         limit, offset = page(request)
         query = request.query_params.get("q", "").strip()
@@ -148,8 +166,8 @@ class CommunityList(CommunityView):
             communities = communities.filter(
                 Q(name__icontains=query) | Q(school__icontains=query) | Q(course__icontains=query)
             )
-        guest_ids = request.session.get("guest_communities", [])
-        identity = guest_id(request)
+        guest_ids = request.session.get("guest_communities", []) if not request.user else []
+        identity = guest_id(request) if not request.user else None
         if mine == "true":
             owned_or_joined = Q(pk__in=guest_ids, owner__isnull=True)
             if identity:
@@ -201,12 +219,26 @@ class CommunityList(CommunityView):
         )
 
     def post(self, request: Request) -> Response:
-        user = actor(request)
+        user = None if settings.CHAT_GUEST_DEMO and not request.user else actor(request)
         parsed = CommunityWriteSerializer(data=request.data)
         parsed.is_valid(raise_exception=True)
-        created = services.create_community(user, parsed.validated_data)
+        if user is None:
+            owned = request.session.get("guest_communities", [])
+            if len(owned) >= services.MAX_OWNED:
+                raise serializers.ValidationError("Community ownership limit reached.")
+            created = services.create_guest_community(
+                parsed.validated_data, ensure_guest_id(request), guest_expiry(request)
+            )
+            request.session["guest_communities"] = [*owned, created.pk]
+        else:
+            created = services.create_community(user, parsed.validated_data)
         created.member_count = 1
         return Response(summary(created, viewer(request, created)), status=201)
+
+
+def visible_channels(community: Community, role: str):
+    channels = community.channels.all()
+    return channels if role in {"moderator", "owner"} else channels.filter(private=False)
 
 
 class CommunityDetail(CommunityView):
@@ -215,7 +247,10 @@ class CommunityDetail(CommunityView):
         return Response(
             {
                 **summary(community, viewer(request, community)),
-                "channels": ChannelSerializer(community.channels.all(), many=True).data,
+                "channels": ChannelSerializer(
+                    visible_channels(community, role_for(community, viewer(request, community))),
+                    many=True,
+                ).data,
             }
         )
 
@@ -294,7 +329,7 @@ class Members(CommunityView):
                 "guest_items": [
                     {
                         "id": guest.pk,
-                        "display_name": f"Guest {hashlib.sha256(guest.guest_id.encode()).hexdigest()[:6]}",
+                        "display_name": guest_name(guest.guest_id),
                         "role": "owner"
                         if owns_as_guest and guest.guest_id == current_guest
                         else "member",
@@ -348,7 +383,12 @@ class Transfer(CommunityView):
 class Channels(CommunityView):
     def get(self, request: Request, community_id: int) -> Response:
         community = community_for(community_id)
-        return Response(ChannelSerializer(community.channels.all(), many=True).data)
+        return Response(
+            ChannelSerializer(
+                visible_channels(community, role_for(community, viewer(request, community))),
+                many=True,
+            ).data
+        )
 
     def post(self, request: Request, community_id: int) -> Response:
         parsed = ChannelWriteSerializer(data=request.data)
@@ -376,6 +416,12 @@ class ChannelDetail(CommunityView):
         class Update(serializers.Serializer):
             name = serializers.RegexField(r"^[a-z0-9][a-z0-9-]{0,49}$", required=False)
             position = serializers.IntegerField(min_value=0, max_value=19, required=False)
+            private = serializers.BooleanField(required=False)
+            read_only = serializers.BooleanField(required=False)
+            slowmode_seconds = serializers.IntegerField(
+                min_value=0, max_value=21600, required=False
+            )
+            topic = serializers.CharField(max_length=256, allow_blank=True, required=False)
             archived = serializers.BooleanField(required=False)
 
         parsed = Update(data=request.data)
@@ -449,6 +495,12 @@ class InviteDetail(CommunityView):
             invite.revoked = True
             invite.save(update_fields=["revoked"])
         return Response(status=204)
+
+
+class InvitePreview(CommunityView):
+    def get(self, request: Request, token: str) -> Response:
+        community = services.preview_invite(token)
+        return Response({"name": community.name, "member_count": services.member_count(community)})
 
 
 class Redeem(CommunityView):

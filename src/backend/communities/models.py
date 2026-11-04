@@ -1,6 +1,7 @@
 """Public communities and their membership boundaries."""
 
 from django.conf import settings
+from django.contrib.postgres.fields import ArrayField
 from django.contrib.postgres.indexes import GinIndex
 from django.contrib.postgres.search import SearchVector
 from django.db import models
@@ -64,6 +65,10 @@ class Channel(models.Model):
     community = models.ForeignKey(Community, on_delete=models.CASCADE, related_name="channels")
     name = models.CharField(max_length=50)
     position = models.PositiveSmallIntegerField(default=0)
+    private = models.BooleanField(default=False)
+    read_only = models.BooleanField(default=False)
+    slowmode_seconds = models.PositiveIntegerField(default=0)
+    topic = models.CharField(max_length=256, blank=True)
     archived = models.BooleanField(default=False)
 
     class Meta:
@@ -76,7 +81,53 @@ class Channel(models.Model):
         return f"{self.name}"
 
 
-class Message(models.Model):
+class Poll(models.Model):
+    options = models.JSONField()
+
+    def __str__(self) -> str:
+        return f"poll {self.pk}"
+
+
+class Vote(models.Model):
+    poll = models.ForeignKey(Poll, related_name="votes", on_delete=models.CASCADE)
+    actor = models.CharField(max_length=128)
+    choice = models.PositiveSmallIntegerField()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=["poll", "actor"], name="vote_once")]
+
+    def __str__(self) -> str:
+        return f"vote on poll {self.poll_id}"
+
+
+class ChatMessageQuery(models.Manager):
+    def get_queryset(self):
+        return (
+            super()
+            .get_queryset()
+            .defer("file_bytes")
+            .select_related("poll")
+            .prefetch_related("poll__votes")
+        )
+
+
+class ChatMessage(models.Model):
+    mentions = ArrayField(models.CharField(max_length=180), default=list, blank=True)
+    poll = models.OneToOneField(
+        Poll, null=True, blank=True, on_delete=models.SET_NULL, related_name="+"
+    )
+    thread_root = models.ForeignKey(
+        "self", null=True, blank=True, on_delete=models.CASCADE, related_name="thread_messages"
+    )
+    file_name = models.CharField(max_length=255, blank=True)
+    file_bytes = models.BinaryField(null=True)
+    objects = ChatMessageQuery()
+
+    class Meta:
+        abstract = True
+
+
+class Message(ChatMessage):
     channel = models.ForeignKey(Channel, on_delete=models.CASCADE, related_name="messages")
     author = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True)
     guest_id = models.CharField(max_length=32, blank=True)
@@ -148,7 +199,8 @@ class DirectConversation(models.Model):
         return f"Direct conversation {self.pk}"
 
 
-class DirectMessage(models.Model):
+class DirectMessage(ChatMessage):
+    pinned_at = models.DateTimeField(null=True, blank=True)
     conversation = models.ForeignKey(
         DirectConversation, on_delete=models.CASCADE, related_name="messages"
     )
@@ -165,6 +217,22 @@ class DirectMessage(models.Model):
 
     def __str__(self) -> str:
         return f"Direct message {self.pk}"
+
+
+class DirectReaction(models.Model):
+    message = models.ForeignKey(DirectMessage, related_name="reactions", on_delete=models.CASCADE)
+    actor = models.CharField(max_length=128)
+    emoji = models.CharField(max_length=32)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["message", "actor", "emoji"], name="direct_reaction_once"
+            )
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.emoji} on direct message {self.message_id}"
 
 
 class Ban(models.Model):
@@ -207,3 +275,36 @@ class ModerationEvent(models.Model):
 
     def __str__(self) -> str:
         return f"{self.action} in {self.community_id}"
+
+
+class RoomMemberState(models.Model):
+    channel = models.ForeignKey(Channel, null=True, on_delete=models.CASCADE)
+    conversation = models.ForeignKey(DirectConversation, null=True, on_delete=models.CASCADE)
+    actor = models.CharField(max_length=128)
+    name = models.CharField(max_length=150)
+    last_active = models.DateTimeField(auto_now=True)
+
+    class Alerts(models.TextChoices):
+        ALL = "all"
+        MENTIONS = "mentions"
+        MUTED = "muted"
+
+    alerts = models.CharField(max_length=8, choices=Alerts.choices, default=Alerts.ALL)
+    last_read = models.PositiveBigIntegerField(default=0)
+    typing_until = models.DateTimeField(null=True)
+
+    class Meta:
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(channel__isnull=True, conversation__isnull=False)
+                    | models.Q(channel__isnull=False, conversation__isnull=True)
+                ),
+                name="one_chat_room",
+            ),
+            models.UniqueConstraint(fields=["channel", "actor"], name="channel_actor_state"),
+            models.UniqueConstraint(fields=["conversation", "actor"], name="dm_actor_state"),
+        ]
+
+    def __str__(self) -> str:
+        return f"room preferences {self.pk}"

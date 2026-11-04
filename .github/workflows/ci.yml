@@ -52,6 +52,11 @@ jobs:
         with:
           bun-version: 1.3.14
 
+      - name: Install Python
+        uses: actions/setup-python@v7
+        with:
+          python-version-file: src/backend/.python-version
+
       - name: Install uv
         uses: astral-sh/setup-uv@v8.1.0
         with:

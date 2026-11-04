@@ -18,14 +18,9 @@ def client_for(user=None):
     return client
 
 
-def test_guest_creation_requires_csrf_and_keeps_ownership_in_session():
-    guest = APIClient(enforce_csrf_checks=True)
-    assert guest.post("/communities", {"name": "Physics"}, format="json").status_code == 403
-    guest.get("/communities")
+def test_existing_guest_owner_can_manage_community(existing_guest_community):
+    guest, community_id = existing_guest_community
     token = guest.cookies["csrftoken"].value
-    created = guest.post("/communities", {"name": "Physics"}, format="json", HTTP_X_CSRFTOKEN=token)
-    assert created.status_code == 201
-    community_id = created.data["id"]
     assert guest.get(f"/communities/{community_id}").data["role"] == "owner"
     assert (
         guest.patch(
@@ -40,7 +35,8 @@ def test_guest_creation_requires_csrf_and_keeps_ownership_in_session():
     invite = guest.post(f"/communities/{community_id}/invites", {}, HTTP_X_CSRFTOKEN=token)
     assert invite.status_code == 201
     visitor = APIClient(enforce_csrf_checks=True)
-    visitor.get("/communities")
+    assert visitor.post(f"/communities/{community_id}/join").status_code == 403
+    visitor.get("/admin/login/")
     visitor_token = visitor.cookies["csrftoken"].value
     assert visitor.get(f"/communities/{community_id}").data["role"] == "visitor"
     assert (
@@ -51,7 +47,6 @@ def test_guest_creation_requires_csrf_and_keeps_ownership_in_session():
     )
     assert visitor.get(f"/communities/{community_id}").data["role"] == "member"
     assert visitor.get(f"/communities/{community_id}").data["member_count"] == 2
-    assert visitor.get("/communities?mine=true").data["items"][0]["id"] == community_id
     assert (
         visitor.delete(
             f"/communities/{community_id}/channels/{channel.data['id']}",
@@ -110,13 +105,10 @@ def test_create_browse_join_and_owner_rules():
     owner = users.create_user(username="owner", password="test-password")
     member = users.create_user(username="member", password="test-password")
     anonymous = client_for()
-    guest_created = anonymous.post("/communities", {"name": "Guest group"}, format="json")
-    assert guest_created.status_code == 201
-    guest_id = guest_created.data["id"]
-    assert guest_created.data["role"] == "owner"
-    assert anonymous.patch(f"/communities/{guest_id}", {"name": "Renamed"}).status_code == 200
-    assert client_for().patch(f"/communities/{guest_id}", {"name": "Nope"}).status_code == 401
-    assert anonymous.get("/communities?mine=true").data["items"][0]["name"] == "Renamed"
+    assert anonymous.get("/communities").status_code == 401
+    assert anonymous.get("/communities?mine=true").status_code == 401
+    assert anonymous.post("/communities", {"name": "Guest group"}, format="json").status_code == 401
+    assert not Community.objects.exists()
 
     created = client_for(owner).post(
         "/communities", {"name": "Math 51A", "course": "MATH 51A"}, format="json"
@@ -124,7 +116,7 @@ def test_create_browse_join_and_owner_rules():
     assert created.status_code == 201
     community_id = created.data["id"]
     assert Channel.objects.get(community_id=community_id).name == "general"
-    assert anonymous.get("/communities?q=Math").data["items"][0]["name"] == "Math 51A"
+    assert client_for(member).get("/communities?q=Math").data["items"][0]["name"] == "Math 51A"
 
     member_client = client_for(member)
     assert member_client.post(f"/communities/{community_id}/join").status_code == 200
@@ -257,3 +249,41 @@ def test_member_cap_is_enforced(monkeypatch):
     second = users.create_user(username="second", password="test-password")
     assert client_for(first).post(f"/communities/{community.pk}/join").status_code == 200
     assert client_for(second).post(f"/communities/{community.pk}/join").status_code == 422
+
+
+@pytest.mark.parametrize("preview", [True, False])
+def test_new_browser_guest_access_is_debug_only_and_requires_csrf(settings, preview):
+    settings.CHAT_GUEST_DEMO = preview
+    guest = APIClient(enforce_csrf_checks=True)
+    assert guest.get("/communities/access").data["guest_preview"] is preview
+    assert guest.get("/communities").status_code == (200 if preview else 401)
+    assert guest.post("/communities", {"name": "Preview"}).status_code == 403
+    created = guest.post(
+        "/communities", {"name": "Preview"}, HTTP_X_CSRFTOKEN=guest.cookies["csrftoken"].value
+    )
+    if preview:
+        assert created.status_code == 201
+        assert created.data["role"] == "owner"
+        assert APIClient().get(f"/communities/{created.data['id']}").data["role"] == "visitor"
+    else:
+        assert created.status_code == 401
+
+
+def test_preview_does_not_join_or_consume_invite_and_demo_can_be_disabled(
+    existing_guest_community, settings
+):
+    owner, community = existing_guest_community
+    invite = owner.post(f"/communities/{community}/invites", {"max_uses": 1}).data
+    path = f"/communities/invites/{invite['token']}"
+    recipient = APIClient()
+    for _ in range(2):
+        assert recipient.get(path).data == {"name": "Study group", "member_count": 1}
+    assert recipient.get(f"/communities/{community}").data["role"] == "visitor"
+    assert recipient.post(path + "/redeem").status_code == 200
+    assert recipient.get(path).status_code == 404
+    settings.CHAT_GUEST_DEMO = False
+    for session in (owner, recipient):
+        assert session.get(f"/communities/{community}").status_code == 401
+        assert session.get("/dms").status_code == 401
+        assert session.post(f"/communities/{community}/join").status_code == 401
+        assert session.post(path + "/redeem").status_code == 401

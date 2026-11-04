@@ -75,9 +75,17 @@ function json(body: unknown): Response {
 let calls: { path: string; parameters: URLSearchParams }[] = [];
 let realFetch: typeof globalThis.fetch;
 
-/** The last request, excluding the facets fetch every mount makes. */
+/**
+ * The last request for results.
+ *
+ * Skips the facets fetch every mount makes, and everything that is not the
+ * API at all: the map view range-requests the basemap archive through this
+ * same stub, and those arrive after the search that opened it.
+ */
 function lastRequest(): { path: string; parameters: URLSearchParams } {
-	const data = calls.filter((call) => call.path !== '/api/spots/facets');
+	const data = calls.filter(
+		(call) => call.path.startsWith('/api/') && call.path !== '/api/spots/facets'
+	);
 	return data[data.length - 1];
 }
 
@@ -396,5 +404,62 @@ describe('typing into the box', () => {
 
 		expect(input.value).toBe('library');
 		expect(input.selectionStart).toBe(4);
+	});
+});
+
+describe('the Map tab in the header', () => {
+	/**
+	 * Disambiguates it from the Map half of the segmented control over the
+	 * results, which is named the same thing and appears once there are any.
+	 */
+	async function openMap() {
+		const navigation = page.getByRole('navigation');
+		const menu = navigation.getByRole('button', { name: 'Site navigation' });
+		if (menu.query()) await menu.click();
+		await navigation.getByRole('button', { name: 'Map' }).click();
+	}
+
+	it('lists the city when nothing has been searched yet', async () => {
+		// An empty box means idle everywhere else on this page, and that is
+		// deliberate -- it is why submitting an empty search does not fetch all
+		// 3,772 spots. The tab is the one thing that asks for them, because
+		// switching the view with no results behind it would scroll someone to
+		// an empty page and look broken.
+		render(Home);
+
+		await openMap();
+
+		await expect.element(page.getByText('1 place')).toBeInTheDocument();
+		expect(lastRequest().path).toBe('/api/spots');
+		expect(lastRequest().parameters.get('q')).toBeNull();
+	});
+
+	it('puts those results on the map rather than in cards', async () => {
+		render(Home);
+
+		await openMap();
+
+		// The pin is a button named for the place; a card's title is a link.
+		await expect
+			.element(page.getByRole('button', { name: 'Allerton Library' }))
+			.toBeInTheDocument();
+		await expect
+			.element(page.getByRole('link', { name: 'Allerton Library' }))
+			.not.toBeInTheDocument();
+	});
+
+	it('maps what a search found rather than starting over', async () => {
+		// Already searched, so the tab switches the view and leaves the results
+		// alone: another request here would replace them with the whole city.
+		render(Home);
+
+		await box().fill('library');
+		await searchButton().click();
+		await expect.element(page.getByText('Bobst Library')).toBeInTheDocument();
+
+		await openMap();
+
+		await expect.element(page.getByRole('button', { name: 'Bobst Library' })).toBeInTheDocument();
+		expect(lastRequest().path).toBe('/api/spots/search');
 	});
 });

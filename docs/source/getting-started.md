@@ -1,6 +1,6 @@
 # Getting started
 
-Docker Compose is the default path because it requires the fewest host tools. Nix is optional and provides the pinned development toolchain used by the repository.
+Docker Compose is the default path because it requires the fewest host tools.
 
 ## Docker-only setup
 
@@ -13,27 +13,6 @@ docker compose up --build --watch
 ```
 
 Open <http://localhost:7500>. Requests under `/api/*` are proxied to the Django API. The backend applies its migrations on startup, so the first run leaves you with a working but empty database; see [Local database configuration](#local-database-configuration) to fill it.
-
-## Nix setup
-
-With Nix and Docker installed:
-
-```shell
-nix develop
-just setup
-just check
-just dev
-```
-
-Nix supplies command-line tools but does not start a Docker daemon. Docker Desktop, Podman with Docker compatibility, or a native Docker daemon must already be running.
-
-If `direnv` is installed and hooked into your shell, the committed `.envrc` can enter the same flake automatically:
-
-```shell
-direnv allow
-```
-
-Approval is intentionally local to each clone. Leaving the repository directory restores the previous shell environment.
 
 ## Manual native setup
 

@@ -154,6 +154,8 @@ describe('signed in', () => {
 		render(AccountPage, { session });
 
 		await expect.element(page.getByRole('heading', { name: 'ada', exact: true })).toBeVisible();
+		const menu = page.getByRole('button', { name: 'Site navigation' });
+		if (menu.query()) await menu.click();
 		// The header's account link, named for the account. Its href is not
 		// checked: $app/paths has no base outside a SvelteKit build.
 		await expect.element(page.getByRole('link', { name: 'ada', exact: true })).toBeVisible();

@@ -72,18 +72,6 @@ docker compose exec postgres psql --username=studyspot studyspot
 docker compose restart backend
 ```
 
-## Nix command surface
-
-The flake pins the repository toolchain. Enter it interactively with `nix develop`, run one command with `nix develop -c COMMAND`, or use the packaged StudySpot command:
-
-```shell
-nix run . -- check
-nix run . -- dev
-nix run . -- deploy-preview
-```
-
-The package delegates to the repository's `justfile`, so Nix and non-Nix developers use the same supported commands. Nix does not store or manage deployment secrets.
-
 ## Local and production parity
 
 The goal is behavioral parity rather than identical infrastructure:

@@ -1,4 +1,7 @@
 <script lang="ts">
+	// Aliased because `page` is a local name for a page of results throughout
+	// this file, which is a different thing entirely.
+	import { page as route } from '$app/state';
 	import SearchBar from '$lib/SearchBar.svelte';
 	import SiteHeader from '$lib/SiteHeader.svelte';
 	import SpotResults from '$lib/SpotResults.svelte';
@@ -18,6 +21,15 @@
 
 	let facets = $state<Facets | null>(null);
 	let filters = $state<SpotFilters>({});
+
+	/**
+	 * List or map.
+	 *
+	 * Held here rather than in `SpotResults` because the choice has to outlive
+	 * a search: a reader who switched to the map and then typed a new query
+	 * meant to see the new results on the map, not to be put back in a list.
+	 */
+	let view = $state<'list' | 'map'>('list');
 
 	/**
 	 * The query and filters the shown results came from.
@@ -125,14 +137,14 @@
 	 * so the page returns to the state it loaded in rather than fetching
 	 * everything.
 	 */
-	async function run(): Promise<void> {
+	async function run(everything = false): Promise<void> {
 		const search = ++latestSearch;
 		const trimmed = query.trim();
 		const filtering = Object.keys(filters).length > 0;
 
 		applied = { query: trimmed, filters: { ...filters } };
 
-		if (!trimmed && !filtering) {
+		if (!trimmed && !filtering && !everything) {
 			status = 'idle';
 			spots = [];
 			total = 0;
@@ -190,6 +202,38 @@
 		else runNow();
 	}
 
+	/** The results, so the Map tab can bring them into view. */
+	let results = $state<HTMLDivElement | null>(null);
+
+	/**
+	 * The Map tab in the header.
+	 *
+	 * It has to lead somewhere on its own: switching the view with nothing
+	 * searched would scroll to an empty page and look broken. `run()` returns
+	 * to idle for an empty query on purpose, so browsing the whole city is
+	 * asked for explicitly here rather than being what an empty box means.
+	 */
+	async function showMap(): Promise<void> {
+		view = 'map';
+		if (status === 'idle') await run(true);
+
+		// Past the hero, which otherwise fills the screen on a fresh page.
+		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+		results?.scrollIntoView({ behavior: reduced ? 'auto' : 'smooth', block: 'start' });
+	}
+
+	/**
+	 * `?view=map` opens the map, which is how the header's Map tab reaches it
+	 * from the detail pages and from Communities.
+	 *
+	 * Read, never written: switching views with the toggle leaves the URL
+	 * alone, so the back button goes back to wherever someone came from rather
+	 * than stepping through every time they changed their mind.
+	 */
+	$effect(() => {
+		if (route.url.searchParams.get('view') === 'map') void showMap();
+	});
+
 	async function handleShowMore(): Promise<void> {
 		if (loadingMore) return;
 		const search = latestSearch;
@@ -231,7 +275,12 @@
 </svelte:head>
 
 <div class="page">
-	<SiteHeader />
+	<!--
+		`onMap` is what makes the header's Map tab a button here rather than a
+		link home: the results it switches to the map are already on this page,
+		and navigating would throw away the search that found them.
+	-->
+	<SiteHeader onMap={showMap} />
 
 	<main>
 		<section class="hero" class:compact={searched} aria-labelledby="hero-title">
@@ -263,8 +312,35 @@
 						No places match these filters.
 					{/if}
 				</p>
-			{:else if status === 'loaded'}
-				<SpotResults {spots} {total} {hasMore} {loadingMore} onShowMore={handleShowMore} />
+			{/if}
+		</div>
+
+		<!--
+			Outside the live region, and kept on screen while the next search is
+			in flight rather than replaced by "Searching…".
+
+			Both for the map's sake. A MapLibre instance is not free to build,
+			and unmounting the results between one query and the next would tear
+			it down and raise it again on every search -- so the pins would
+			blink out and re-frame each time someone finished typing a word. The
+			results on screen are still the answer to the last query until the
+			new one lands, which is also why the list reads better this way.
+
+			Moving it out of the live region is the other half: a screen reader
+			was being handed every card of every result set. The count line
+			inside announces the outcome now, which is the part worth hearing.
+		-->
+		<div bind:this={results}>
+			{#if spots.length > 0 && status !== 'error'}
+				<SpotResults
+					{spots}
+					{total}
+					{hasMore}
+					{loadingMore}
+					{view}
+					onView={(next) => (view = next)}
+					onShowMore={handleShowMore}
+				/>
 			{/if}
 		</div>
 	</main>

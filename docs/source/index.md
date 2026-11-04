@@ -13,7 +13,6 @@ The service topology, health endpoint, shared study-spot model and migrations, d
 getting-started
 local-development
 docker
-nix
 ```
 
 ```{toctree}

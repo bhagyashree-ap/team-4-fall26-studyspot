@@ -1,4 +1,6 @@
 <script lang="ts">
+	import { Input } from '$lib/components/ui/input';
+	import { chatControls } from '$lib/chatControls';
 	let {
 		id,
 		label,
@@ -68,11 +70,11 @@
 	}}
 >
 	<label for={id}>{label}</label>
-	<input
+	<Input
 		{id}
-		bind:this={input}
+		bind:ref={input}
 		bind:value
-		maxlength="100"
+		maxlength={100}
 		{placeholder}
 		autocomplete="off"
 		role="combobox"
@@ -98,6 +100,7 @@
 			<div id={`${id}-list`} role="listbox" aria-label={`${label} suggestions`}>
 				{#each matches as choice, index (choice)}
 					<button
+						class={chatControls.ghost}
 						id={`${id}-option-${index}`}
 						type="button"
 						role="option"
@@ -123,17 +126,17 @@
 		font-weight: 700;
 		margin-bottom: 8px;
 	}
-	input {
+	.picker :global(input) {
 		width: 100%;
-		border: 1px solid #d8cdd0;
-		background: white;
+		border: 1px solid var(--line, #d8cdd0);
+		background: var(--panel, white);
 		border-radius: 8px;
 		padding: 11px 12px;
 		font: inherit;
 	}
-	input:focus-visible,
+	.picker :global(input:focus-visible),
 	button:focus-visible {
-		outline: 3px solid #2458a6;
+		outline: 3px solid var(--accent, #2458a6);
 		outline-offset: 2px;
 	}
 	.suggestions {
@@ -142,8 +145,8 @@
 		left: 0;
 		right: 0;
 		top: calc(100% - 23px);
-		background: white;
-		border: 1px solid #d8cdd0;
+		background: var(--panel, white);
+		border: 1px solid var(--line, #d8cdd0);
 		border-radius: 10px;
 		box-shadow: 0 14px 30px rgb(43 20 30 / 15%);
 		max-height: 315px;
@@ -152,7 +155,7 @@
 	.suggestions p {
 		margin: 0;
 		padding: 10px 12px 4px;
-		color: #65585d;
+		color: var(--muted, #65585d);
 		font-size: 12px;
 		font-weight: 700;
 	}
@@ -162,18 +165,18 @@
 		min-height: 40px;
 		padding: 9px 12px;
 		border: 0;
-		background: white;
+		background: var(--panel, white);
 		font: inherit;
 		text-align: left;
 		cursor: pointer;
 	}
 	.suggestions button:hover,
 	.suggestions button[aria-selected='true'] {
-		background: #f8e0e7;
+		background: var(--hover, #f8e0e7);
 	}
 	.help {
 		margin: 5px 0 0;
-		color: #65585d;
+		color: var(--muted, #65585d);
 		font-size: 12px;
 	}
 </style>

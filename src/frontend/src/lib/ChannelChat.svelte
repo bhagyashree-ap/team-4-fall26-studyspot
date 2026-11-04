@@ -1,4 +1,28 @@
 <script lang="ts">
+	import { chatControls } from '$lib/chatControls';
+	import { Textarea } from '$lib/components/ui/textarea';
+	import SearchMessages from './SearchMessages.svelte';
+	import MessageLink from './MessageLink.svelte';
+	import LinkedMessage from './LinkedMessage.svelte';
+	import Ballot from './Ballot.svelte';
+	import ComposerTools from './ComposerTools.svelte';
+	import Send from '@lucide/svelte/icons/send';
+	import Pin from '@lucide/svelte/icons/pin';
+	import MessageSquare from '@lucide/svelte/icons/message-square';
+	import Pencil from '@lucide/svelte/icons/pencil';
+	import Trash2 from '@lucide/svelte/icons/trash-2';
+	import Reply from '@lucide/svelte/icons/reply';
+	import Mail from '@lucide/svelte/icons/mail';
+	import CheckCheck from '@lucide/svelte/icons/check-check';
+	import Link2 from '@lucide/svelte/icons/link-2';
+	import Search from '@lucide/svelte/icons/search';
+	import Hash from '@lucide/svelte/icons/hash';
+	import { pollMessages, mergeMessages } from './history';
+	import EmojiPicker from './EmojiPicker.svelte';
+	import ChatThread from './ChatThread.svelte';
+	import Attachment from './Attachment.svelte';
+	import { composeMessage } from './communities';
+	import MessageBody from './MessageBody.svelte';
 	import { tick } from 'svelte';
 	import {
 		communityRequest,
@@ -11,11 +35,15 @@
 		communityId,
 		channel,
 		role,
+		names = [],
+		onShare,
 		onDirectMessage
 	}: {
 		communityId: number;
 		channel: Channel;
+		names?: string[];
 		role: string;
+		onShare: () => void;
 		onDirectMessage: (conversation: DirectConversation) => void;
 	} = $props();
 
@@ -25,21 +53,37 @@
 	let replyTo = $state<Message | null>(null);
 	let editingId = $state<number | null>(null);
 	let draft = $state('');
-	let reactionFor = $state<number | null>(null);
 	let showSearch = $state(false);
-	let search = $state('');
-	let results = $state<Message[] | null>(null);
+
+	let results = $state<Pick<Message, 'id' | 'author_name' | 'created_at' | 'content'>[] | null>(
+		null
+	);
 	let showPinsPanel = $state(false);
 	let pins = $state<Message[] | null>(null);
 	let error = $state('');
+	let files = $state<FileList>();
+	let thread = $state<{ id: number; content: string } | null>(null);
+	let lastRead = $state(0);
+	async function mark(unread_from?: number) {
+		try {
+			const result = await communityRequest<{ last_read: number }>(
+				base() + '/read',
+				'PUT',
+				unread_from ? { unread_from } : {}
+			);
+			lastRead = result.last_read;
+		} catch (e) {
+			error = problem(e);
+		}
+	}
+	let presence = $state<ComposerTools>();
 	let sending = $state(false);
+	let cursor: number | null = null,
+		refreshCount = 0;
 	let polling = false;
 	let generation = 0;
 	let messageList = $state<HTMLDivElement>();
 	let composeEl = $state<HTMLTextAreaElement>();
-	let prevMsgCount = 0;
-
-	const emojiChoices = ['👍', '❤️', '😂', '🎉', '😮', '🔥', '😢'];
 
 	const base = () => `/communities/${communityId}/channels/${channel.id}`;
 	const problem = (cause: unknown) =>
@@ -100,7 +144,7 @@
 		);
 	}
 
-	const palette = ['#9b1c3a', '#eb459e', '#3ba55c', '#faa61a', '#9b59b6', '#1abc9c', '#e67e22'];
+	const palette = ['#5865b9', '#976689', '#377f73', '#95634d', '#79659b', '#43728b', '#8c6441'];
 	function avatarColor(name: string): string {
 		let h = 0;
 		for (const c of name) h = (h * 31 + c.charCodeAt(0)) | 0;
@@ -131,6 +175,7 @@
 			);
 			if (current !== generation) return;
 			messages = page.items;
+			cursor = page.items.at(-1)?.id ?? 0;
 			hasOlder = page.has_more;
 			error = '';
 			await scrollToBottom();
@@ -140,24 +185,30 @@
 	}
 
 	async function refresh() {
-		if (polling || document.visibilityState !== 'visible') return;
+		if (polling || document.hidden || cursor === null) return;
 		polling = true;
 		const current = generation;
 		try {
-			const page = await communityRequest<{ items: Message[]; has_more: boolean }>(
-				`${base()}/messages`
-			);
-			if (current === generation) {
-				const first = page.items[0]?.id;
-				const retained = first ? messages.filter((item) => item.id < first) : [];
-				const older = retained.slice(-200);
-				const hadNew = page.items.some((m) => !messages.find((e) => e.id === m.id));
-				messages = [...older, ...page.items];
-				hasOlder ||= retained.length > older.length;
-				if (hadNew) await scrollToBottom();
-			}
-		} catch (cause) {
-			if (current === generation) error = problem(cause);
+			const visible = ++refreshCount % 3 === 0 ? messages.slice(-250).map((m) => m.id) : [];
+			const page = await pollMessages<Message>(base() + '/messages', cursor, visible);
+			if (current !== generation) return;
+			const previous = cursor;
+			cursor = page.after;
+			const merged = mergeMessages(messages, page.updates);
+			hasOlder ||= merged.length > 250;
+			messages = merged.slice(-250);
+			if (
+				cursor > previous &&
+				messageList &&
+				messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight < 160
+			)
+				await scrollToBottom();
+			if (page.more)
+				window.setTimeout(() => {
+					if (current === generation) void refresh();
+				}, 0);
+		} catch (e) {
+			if (current === generation) error = problem(e);
 		} finally {
 			polling = false;
 		}
@@ -181,12 +232,17 @@
 	}
 
 	async function send() {
-		if (!content.trim() || sending) return;
+		if ((!content.trim() && !files?.length) || sending) return;
 		sending = true;
 		const body = { content: content.trim(), ...(replyTo ? { reply_to: replyTo.id } : {}) };
 		try {
-			const message = await communityRequest<Message>(`${base()}/messages`, 'POST', body);
-			messages = [...messages, message];
+			const message = await communityRequest<Message>(
+				`${base()}/messages`,
+				'POST',
+				composeMessage(body, files?.[0])
+			);
+			messages = mergeMessages(messages, [message]);
+			files = new DataTransfer().files;
 			content = '';
 			replyTo = null;
 			error = '';
@@ -210,28 +266,19 @@
 			if (method === 'DELETE' && !suffix) {
 				messages = messages.map((item) =>
 					item.id === message.id
-						? { ...item, content: '', deleted_at: new Date().toISOString(), reactions: [], pinned_at: null }
+						? {
+								...item,
+								content: '',
+								deleted_at: new Date().toISOString(),
+								reactions: [],
+								pinned_at: null
+							}
 						: item
 				);
 			} else {
 				messages = messages.map((item) => (item.id === changed.id ? changed : item));
 			}
 			if (method === 'PATCH') editingId = null;
-			reactionFor = null;
-			error = '';
-		} catch (cause) {
-			error = problem(cause);
-		}
-	}
-
-	async function find() {
-		if (search.trim().length < 2) return;
-		try {
-			const found = await communityRequest<{ items: Message[] }>(
-				`/communities/${communityId}/messages/search?q=${encodeURIComponent(search.trim())}`
-			);
-			results = found.items;
-			pins = null;
 			error = '';
 		} catch (cause) {
 			error = problem(cause);
@@ -289,7 +336,6 @@
 		results = pins = null;
 		showSearch = false;
 		showPinsPanel = false;
-		prevMsgCount = 0;
 		void load();
 		const timer = window.setInterval(() => void refresh(), 3000);
 		return () => {
@@ -301,59 +347,76 @@
 
 <div class="chat">
 	<div class="chat-header">
-		<span class="hash" aria-hidden="true">#</span>
+		<Hash size={22} class="channel-hash" />
 		<strong class="channel-title">{channel.name}</strong>
+		{#if channel.slowmode_seconds}<span>Slowmode · {channel.slowmode_seconds}s</span>{/if}
+		{#if channel.read_only}<span>Read-only</span>{/if}
 		{#if channel.archived}<span class="archived-badge">Archived</span>{/if}
+		{#if channel.topic}<span class="header-topic">{channel.topic}</span>{/if}
 		<div class="header-actions">
 			<button
-				class="icon-btn"
+				class="icon-btn {chatControls.icon}"
+				title="Copy channel link"
+				aria-label="Copy channel link"
+				onclick={onShare}><Link2 size={18} /></button
+			>
+			<button
+				class="icon-btn {chatControls.icon}"
 				class:active={showSearch}
 				aria-label="Search messages"
 				title="Search"
 				onclick={() => {
 					showSearch = !showSearch;
-					if (!showSearch) { search = ''; results = null; }
+					if (!showSearch) {
+						results = null;
+					}
 					pins = null;
 					showPinsPanel = false;
 				}}
 			>
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+				<Search size={18} />
 			</button>
 			<button
-				class="icon-btn"
+				class="icon-btn {chatControls.icon}"
 				class:active={showPinsPanel}
 				aria-label="Pinned messages"
 				title="Pins"
-				onclick={() => { void loadPins(); showSearch = false; }}
+				onclick={() => {
+					void loadPins();
+					showSearch = false;
+				}}
 			>
-				<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+				<Pin size={18} />
 			</button>
 		</div>
 	</div>
 
 	{#if showSearch}
-		<form
-			class="search-bar"
-			onsubmit={(e) => { e.preventDefault(); void find(); }}
-		>
-			<input
-				aria-label="Search messages in this channel"
-				placeholder="Search messages…"
-				bind:value={search}
-				autofocus
-			/>
-			<button type="submit">Search</button>
-			<button type="button" onclick={closeOverlay}>✕</button>
-		</form>
+		<SearchMessages
+			url={`/communities/${communityId}/messages/search`}
+			onresults={(items) => {
+				results = items;
+				pins = null;
+			}}
+			onerror={(s) => (error = s)}
+		/>
 	{/if}
 
+	{#if thread}{#key thread.id}<ChatThread
+				url={base() + '/messages'}
+				root={thread}
+				onclose={() => (thread = null)}
+			/>{/key}{/if}
+	<LinkedMessage loaded={messages} url={base() + '/messages'} />
 	{#if error}<p class="error" role="alert">{error}</p>{/if}
 
 	{#if results !== null || (pins !== null && showPinsPanel)}
 		<div class="overlay-panel">
 			<div class="overlay-header">
 				<h4>{results !== null ? 'Search results' : 'Pinned messages'}</h4>
-				<button class="icon-btn" onclick={closeOverlay} aria-label="Close">✕</button>
+				<button class="icon-btn {chatControls.icon}" onclick={closeOverlay} aria-label="Close"
+					>✕</button
+				>
 			</div>
 			<div class="overlay-list">
 				{#each results ?? pins ?? [] as item (item.id)}
@@ -372,7 +435,9 @@
 	{:else}
 		<div class="messages" bind:this={messageList} aria-live="polite">
 			{#if hasOlder}
-				<button class="load-older" onclick={() => void older()}>Load older messages</button>
+				<button class="load-older {chatControls.ghost}" onclick={() => void older()}
+					>Load older messages</button
+				>
 			{/if}
 			{#if !messages.length && !hasOlder}
 				<div class="channel-start">
@@ -388,26 +453,42 @@
 				{#if showDateSep(i)}
 					<div class="date-sep"><span>{formatDate(message.created_at)}</span></div>
 				{/if}
+				{#if message.id > lastRead && messages.find((m) => m.id > lastRead)?.id === message.id}<div
+						class="unread-divider"
+					>
+						Unread messages
+					</div>{/if}
 				<article
 					class="message"
 					class:grouped={!header}
 					class:deleted={!!message.deleted_at}
-					id={`msg-${message.id}`}
+					id={`message-${message.id}`}
 				>
 					{#if header}
-						<div class="avatar" style="background:{avatarColor(message.author_name)}" aria-hidden="true">
+						<div
+							class="avatar"
+							style="background:{avatarColor(message.author_name)}"
+							aria-hidden="true"
+						>
 							{initials(message.author_name)}
 						</div>
 					{:else}
 						<div class="avatar-gap" aria-hidden="true">
-							<time class="hover-time">{new Date(message.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</time>
+							<time class="hover-time"
+								>{new Date(message.created_at).toLocaleTimeString([], {
+									hour: 'numeric',
+									minute: '2-digit'
+								})}</time
+							>
 						</div>
 					{/if}
 					<div class="msg-body">
 						{#if header}
 							<div class="msg-head">
 								<strong class="author">{message.author_name}</strong>
-								<time class="timestamp" datetime={message.created_at}>{formatTime(message.created_at)}</time>
+								<time class="timestamp" datetime={message.created_at}
+									>{formatTime(message.created_at)}</time
+								>
 								{#if message.pinned_at}<span class="pin-badge">📌</span>{/if}
 							</div>
 						{/if}
@@ -420,44 +501,61 @@
 						{#if editingId === message.id}
 							<form
 								class="edit-form"
-								onsubmit={(e) => { e.preventDefault(); void change(message, 'PATCH', '', { content: draft }); }}
+								onsubmit={(e) => {
+									e.preventDefault();
+									void change(message, 'PATCH', '', { content: draft });
+								}}
 							>
-								<textarea
+								<Textarea
 									aria-label="Edit message"
-									maxlength="2000"
+									maxlength={2000}
 									bind:value={draft}
-									rows="2"
+									rows={2}
 									onkeydown={(e) => {
-										if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void change(message, 'PATCH', '', { content: draft }); }
+										if (e.key === 'Enter' && !e.shiftKey) {
+											e.preventDefault();
+											void change(message, 'PATCH', '', { content: draft });
+										}
 										if (e.key === 'Escape') editingId = null;
 									}}
-								></textarea>
+								></Textarea>
 								<div class="edit-actions">
 									<span class="hint">Enter to save · Escape to cancel</span>
-									<button disabled={!draft.trim()}>Save</button>
-									<button type="button" onclick={() => (editingId = null)}>Cancel</button>
+									<button class={chatControls.ghost} disabled={!draft.trim()}>Save</button>
+									<button
+										class={chatControls.ghost}
+										type="button"
+										onclick={() => (editingId = null)}>Cancel</button
+									>
 								</div>
 							</form>
 						{:else}
-							<p class="msg-content">
-								{message.deleted_at
-									? 'This message was deleted.'
-									: message.content}{message.edited_at && !message.deleted_at ? ' (edited)' : ''}
-							</p>
+							{#if message.deleted_at}This message was deleted.{:else}{#if message.poll}<Ballot
+										poll={message.poll}
+										url={base() + '/messages' + '/' + message.id + '/vote'}
+										onvote={(poll) =>
+											(messages = messages.map((m) => (m.id === message.id ? { ...m, poll } : m)))}
+									/>{/if}{#if message.file_name}<Attachment
+										url={base() + '/messages/' + message.id}
+										name={message.file_name}
+									/>{/if}<MessageBody content={message.content} />{#if message.edited_at}<small
+										>(edited)</small
+									>{/if}{/if}
 						{/if}
 						{#if message.reactions.length}
 							<div class="reactions">
 								{#each message.reactions as reaction (reaction.emoji)}
 									<button
-										class="reaction"
+										class="reaction {chatControls.ghost}"
 										class:reacted={reaction.me}
-										onclick={() => void change(
-											message,
-											reaction.me ? 'DELETE' : 'POST',
-											`/reactions${reaction.me ? `/${encodeURIComponent(reaction.emoji)}` : ''}`,
-											reaction.me ? undefined : { emoji: reaction.emoji }
-										)}
-									>{reaction.emoji} <span>{reaction.count}</span></button>
+										onclick={() =>
+											void change(
+												message,
+												reaction.me ? 'DELETE' : 'POST',
+												`/reactions${reaction.me ? `/${encodeURIComponent(reaction.emoji)}` : ''}`,
+												reaction.me ? undefined : { emoji: reaction.emoji }
+											)}>{reaction.emoji} <span>{reaction.count}</span></button
+									>
 								{/each}
 							</div>
 						{/if}
@@ -465,85 +563,147 @@
 
 					{#if !message.deleted_at}
 						<div class="msg-actions" role="toolbar" aria-label="Message actions">
+							<EmojiPicker
+								reaction
+								onpick={(emoji) => void change(message, 'POST', '/reactions', { emoji })}
+							/><button
+								class={chatControls.icon}
+								onclick={() => (thread = message)}
+								title="Open thread"
+								aria-label="Open thread"><MessageSquare size={16} /></button
+							><button
+								class={chatControls.icon}
+								onclick={() => void mark(message.id)}
+								title="Mark unread"
+								aria-label="Mark unread"><CheckCheck size={16} /></button
+							><MessageLink id={message.id} />
 							<button
-								class="action-btn"
-								title="Add reaction"
-								onclick={() => (reactionFor = reactionFor === message.id ? null : message.id)}
-							>😊</button>
-							<button class="action-btn" title="Reply" onclick={() => (replyTo = message)}>↩</button>
+								class="action-btn {chatControls.icon}"
+								title="Reply"
+								onclick={() => (replyTo = message)}><Reply size={16} /></button
+							>
 							{#if !message.mine}
-								<button class="action-btn" title="Direct message" onclick={() => void startDM(message)}>✉</button>
+								<button
+									class="action-btn {chatControls.icon}"
+									title="Direct message"
+									onclick={() => void startDM(message)}><Mail size={16} /></button
+								>
 							{/if}
 							{#if message.mine}
-								<button class="action-btn" title="Edit message" onclick={() => { editingId = message.id; draft = message.content; }}>✏</button>
+								<button
+									class="action-btn {chatControls.icon}"
+									title="Edit message"
+									onclick={() => {
+										editingId = message.id;
+										draft = message.content;
+									}}><Pencil size={16} /></button
+								>
 							{/if}
 							{#if role === 'owner' || role === 'moderator'}
 								<button
-									class="action-btn"
+									class="action-btn {chatControls.icon}"
 									title={message.pinned_at ? 'Unpin' : 'Pin message'}
-									onclick={() => void change(message, message.pinned_at ? 'DELETE' : 'POST', '/pin')}
-								>{message.pinned_at ? '📌' : '📍'}</button>
+									onclick={() =>
+										void change(message, message.pinned_at ? 'DELETE' : 'POST', '/pin')}
+									><Pin size={16} /></button
+								>
 							{/if}
 							{#if message.can_delete}
 								<button
-									class="action-btn danger"
+									class="action-btn danger {chatControls.danger}"
 									title="Delete message"
-									onclick={() => { if (confirm('Delete this message?')) void change(message, 'DELETE'); }}
-								>🗑</button>
+									onclick={() => {
+										if (confirm('Delete this message?')) void change(message, 'DELETE');
+									}}><Trash2 size={16} /></button
+								>
 							{/if}
 						</div>
 					{/if}
 				</article>
-				{#if reactionFor === message.id}
-					<div class="emoji-picker" role="toolbar" aria-label="Reaction picker">
-						{#each emojiChoices as emoji (emoji)}
-							<button onclick={() => void change(message, 'POST', '/reactions', { emoji })}>{emoji}</button>
-						{/each}
-						<button onclick={() => (reactionFor = null)}>✕</button>
-					</div>
-				{/if}
 			{/each}
 		</div>
 
 		{#if replyTo}
 			<div class="reply-bar">
 				<span class="reply-bar-icon">↩</span>
-				<span>Replying to <strong>{replyTo.author_name}</strong> — {replyTo.content.slice(0, 60)}{replyTo.content.length > 60 ? '…' : ''}</span>
-				<button onclick={() => (replyTo = null)} aria-label="Cancel reply">✕</button>
+				<span
+					>Replying to <strong>{replyTo.author_name}</strong> — {replyTo.content.slice(
+						0,
+						60
+					)}{replyTo.content.length > 60 ? '…' : ''}</span
+				>
+				<button class={chatControls.icon} onclick={() => (replyTo = null)} aria-label="Cancel reply"
+					>✕</button
+				>
 			</div>
 		{/if}
 
+		{#if files?.length}<p class="attachment-chip">
+				{files[0].name}
+				<button
+					class={chatControls.icon}
+					type="button"
+					aria-label="Remove attachment"
+					onclick={() => (files = new DataTransfer().files)}>×</button
+				>
+			</p>{/if}
 		<div class="composer" class:archived={channel.archived}>
-			<textarea
-				bind:this={composeEl}
+			<ComposerTools
+				room={base()}
+				{names}
+				groups={role === 'owner' || role === 'moderator'}
+				bind:files
+				bind:this={presence}
+				onread={(id) => (lastRead = id)}
+				onmention={(v) => (content += (content ? ' ' : '') + v + ' ')}
+				onmark={() => void mark()}
+				onsent={() => void refresh()}
+			/>
+			<Textarea
+				bind:ref={composeEl}
 				aria-label={channel.archived ? 'Channel is archived' : `Message #${channel.name}`}
 				placeholder={channel.archived ? 'This channel is archived.' : `Message #${channel.name}`}
-				maxlength="2000"
-				rows="1"
+				maxlength={2000}
+				rows={1}
 				bind:value={content}
-				disabled={channel.archived}
+				disabled={channel.archived || (channel.read_only && role === 'member')}
 				onkeydown={handleCompose}
-				oninput={resizeCompose}
-			></textarea>
-			<button
-				class="send-btn"
-				disabled={channel.archived || sending || !content.trim()}
+				oninput={() => {
+					resizeCompose();
+					presence?.typing();
+				}}
+			></Textarea>
+			<EmojiPicker onpick={(v) => (content += v)} /><button
+				class="send-btn {chatControls.icon}"
+				disabled={channel.archived ||
+					(channel.read_only && role === 'member') ||
+					sending ||
+					(!content.trim() && !files?.length)}
 				onclick={() => void send()}
 				aria-label="Send message"
 			>
-				<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+				<Send size={19} />
 			</button>
 		</div>
 	{/if}
 </div>
 
 <style>
+	.unread-divider {
+		border-top: 1px solid var(--accent);
+		color: var(--accent);
+		font-size: 0.8rem;
+		text-align: center;
+	}
+	.chat {
+		position: relative;
+	}
 	.chat {
 		display: flex;
 		flex-direction: column;
 		flex: 1;
 		min-height: 0;
-		background: #fff;
+		background: var(--panel);
 	}
 
 	/* ── Header ── */
@@ -553,25 +713,19 @@
 		gap: 8px;
 		height: 48px;
 		padding: 0 16px;
-		border-bottom: 1px solid #ebebed;
+		border-bottom: 1px solid var(--line);
 		flex-shrink: 0;
-		background: #fff;
-	}
-	.hash {
-		color: #8a8490;
-		font-size: 18px;
-		font-weight: 700;
-		line-height: 1;
+		background: var(--panel);
 	}
 	.channel-title {
 		font-size: 15px;
 		font-weight: 700;
-		color: #0f0d10;
+		color: var(--ink);
 	}
 	.archived-badge {
 		font-size: 11px;
-		background: #f3f2f5;
-		color: #8a8490;
+		background: var(--well);
+		color: var(--muted);
 		border-radius: 4px;
 		padding: 2px 6px;
 	}
@@ -588,60 +742,25 @@
 		border: 0;
 		background: transparent;
 		border-radius: 8px;
-		color: #8a8490;
+		color: var(--muted);
 		cursor: pointer;
-		transition: background 0.12s, color 0.12s;
+		transition:
+			background 0.12s,
+			color 0.12s;
 		padding: 0;
 		min-height: 0;
 		font-size: 14px;
 	}
 	.icon-btn:hover {
-		background: #f3f2f5;
-		color: #0f0d10;
+		background: var(--well);
+		color: var(--ink);
 	}
 	.icon-btn.active {
-		background: #fdf2f5;
-		color: #9b1c3a;
+		background: var(--selected);
+		color: var(--accent);
 	}
 
 	/* ── Search bar ── */
-	.search-bar {
-		display: flex;
-		gap: 8px;
-		padding: 8px 16px;
-		border-bottom: 1px solid #ebebed;
-		background: #f9f8fa;
-		flex-shrink: 0;
-		animation: slideDown 0.15s ease;
-	}
-	.search-bar input {
-		flex: 1;
-		border: 1px solid #d4d2d8;
-		border-radius: 8px;
-		padding: 7px 10px;
-		font: inherit;
-		font-size: 14px;
-		background: #fff;
-		color: #0f0d10;
-	}
-	.search-bar input:focus {
-		outline: none;
-		border-color: #9b1c3a;
-		box-shadow: 0 0 0 3px rgba(155,28,58,0.10);
-	}
-	.search-bar button {
-		cursor: pointer;
-		border: 1px solid #d4d2d8;
-		border-radius: 8px;
-		background: #fff;
-		padding: 7px 12px;
-		font: inherit;
-		font-size: 13px;
-		font-weight: 600;
-		transition: background 0.1s;
-		color: #4a4550;
-	}
-	.search-bar button:hover { background: #f3f2f5; }
 
 	/* ── Overlay (search results / pins) ── */
 	.overlay-panel {
@@ -655,14 +774,14 @@
 		align-items: center;
 		justify-content: space-between;
 		padding: 12px 20px;
-		border-bottom: 1px solid #ebebed;
+		border-bottom: 1px solid var(--line);
 		flex-shrink: 0;
 	}
 	.overlay-header h4 {
 		margin: 0;
 		font-size: 14px;
 		font-weight: 700;
-		color: #0f0d10;
+		color: var(--ink);
 	}
 	.overlay-list {
 		flex: 1;
@@ -672,7 +791,7 @@
 	}
 	.overlay-message {
 		padding: 10px 0;
-		border-bottom: 1px solid #f3f2f5;
+		border-bottom: 1px solid var(--well);
 	}
 	.overlay-meta {
 		display: flex;
@@ -680,10 +799,23 @@
 		align-items: baseline;
 		margin-bottom: 4px;
 	}
-	.overlay-meta strong { font-size: 14px; color: #0f0d10; }
-	.overlay-meta time { font-size: 11px; color: #8a8490; }
-	.overlay-message p { margin: 0; font-size: 14px; color: #4a4550; }
-	.empty { color: #8a8490; font-size: 14px; }
+	.overlay-meta strong {
+		font-size: 14px;
+		color: var(--ink);
+	}
+	.overlay-meta time {
+		font-size: 11px;
+		color: var(--muted);
+	}
+	.overlay-message p {
+		margin: 0;
+		font-size: 14px;
+		color: var(--muted);
+	}
+	.empty {
+		color: var(--muted);
+		font-size: 14px;
+	}
 
 	/* ── Messages list ── */
 	.messages {
@@ -700,7 +832,7 @@
 		align-items: center;
 		gap: 12px;
 		padding: 12px 20px 4px;
-		color: #8a8490;
+		color: var(--muted);
 		font-size: 12px;
 		font-weight: 600;
 	}
@@ -709,7 +841,7 @@
 		content: '';
 		flex: 1;
 		height: 1px;
-		background: #ebebed;
+		background: var(--line);
 	}
 	.date-sep span {
 		white-space: nowrap;
@@ -731,8 +863,16 @@
 		font-weight: 700;
 		margin-bottom: 16px;
 	}
-	.channel-start h3 { margin: 0 0 6px; font-size: 26px; color: #0f0d10; }
-	.channel-start p { margin: 0; color: #8a8490; font-size: 15px; }
+	.channel-start h3 {
+		margin: 0 0 6px;
+		font-size: 26px;
+		color: var(--ink);
+	}
+	.channel-start p {
+		margin: 0;
+		color: var(--muted);
+		font-size: 15px;
+	}
 
 	.load-older {
 		display: block;
@@ -740,12 +880,14 @@
 		font-size: 12px;
 		border: 0;
 		background: transparent;
-		color: #9b1c3a;
+		color: var(--accent);
 		cursor: pointer;
 		padding: 4px 8px;
 		font-weight: 600;
 	}
-	.load-older:hover { text-decoration: underline; }
+	.load-older:hover {
+		text-decoration: underline;
+	}
 
 	/* ── Message ── */
 	.message {
@@ -757,15 +899,11 @@
 		transition: background 0.06s;
 	}
 	.message:hover {
-		background: #f9f8fa;
+		background: var(--hover);
 	}
 	.message.grouped {
 		padding-top: 1px;
 		padding-bottom: 1px;
-	}
-	.message.deleted .msg-content {
-		color: #8a8490;
-		font-style: italic;
 	}
 
 	/* Avatar */
@@ -790,12 +928,14 @@
 	}
 	.hover-time {
 		font-size: 10px;
-		color: #8a8490;
+		color: var(--muted);
 		opacity: 0;
 		transition: opacity 0.1s;
 		white-space: nowrap;
 	}
-	.message:hover .hover-time { opacity: 1; }
+	.message:hover .hover-time {
+		opacity: 1;
+	}
 
 	/* Body */
 	.msg-body {
@@ -811,21 +951,14 @@
 	.author {
 		font-size: 15px;
 		font-weight: 700;
-		color: #0f0d10;
+		color: var(--ink);
 	}
 	.timestamp {
 		font-size: 11px;
-		color: #8a8490;
+		color: var(--muted);
 	}
-	.pin-badge { font-size: 11px; }
-
-	.msg-content {
-		margin: 0;
-		font-size: 15px;
-		line-height: 1.5;
-		color: #0f0d10;
-		white-space: pre-wrap;
-		overflow-wrap: anywhere;
+	.pin-badge {
+		font-size: 11px;
 	}
 
 	/* Reply preview */
@@ -835,12 +968,16 @@
 		align-items: center;
 		margin-bottom: 4px;
 		padding-left: 12px;
-		border-left: 2px solid #d4d2d8;
-		color: #8a8490;
+		border-left: 2px solid var(--line);
+		color: var(--muted);
 		font-size: 13px;
 		overflow: hidden;
 	}
-	.reply-author { font-weight: 700; color: #9b1c3a; white-space: nowrap; }
+	.reply-author {
+		font-weight: 700;
+		color: var(--accent);
+		white-space: nowrap;
+	}
 	.reply-text {
 		overflow: hidden;
 		text-overflow: ellipsis;
@@ -859,34 +996,47 @@
 		align-items: center;
 		gap: 4px;
 		padding: 2px 8px;
-		border: 1px solid #d4d2d8;
+		border: 1px solid var(--line);
 		border-radius: 100px;
-		background: #f3f2f5;
+		background: var(--well);
 		font-size: 13px;
 		cursor: pointer;
-		transition: background 0.1s, border-color 0.1s;
+		transition:
+			background 0.1s,
+			border-color 0.1s;
 		min-height: 26px;
 	}
-	.reaction span { color: #4a4550; font-size: 13px; }
-	.reaction:hover { background: #ebebed; border-color: #b4afba; }
-	.reaction.reacted { background: #fdf2f5; border-color: #9b1c3a; }
-	.reaction.reacted span { color: #9b1c3a; }
+	.reaction span {
+		color: var(--muted);
+		font-size: 13px;
+	}
+	.reaction:hover {
+		background: var(--line);
+		border-color: var(--muted);
+	}
+	.reaction.reacted {
+		background: var(--selected);
+		border-color: var(--accent);
+	}
+	.reaction.reacted span {
+		color: var(--accent);
+	}
 
 	/* Edit form */
 	.edit-form {
 		margin: 4px 0;
 	}
-	.edit-form textarea {
+	.edit-form :global(textarea) {
 		width: 100%;
-		border: 1px solid #9b1c3a;
+		border: 1px solid var(--accent);
 		border-radius: 4px;
 		padding: 10px 12px;
 		font: inherit;
 		font-size: 15px;
 		resize: none;
 		outline: none;
-		background: #fff;
-		box-shadow: 0 0 0 2px rgba(155,28,58,0.15);
+		background: var(--panel);
+		box-shadow: 0 0 0 2px var(--selected);
 	}
 	.edit-actions {
 		display: flex;
@@ -895,21 +1045,43 @@
 		margin-top: 6px;
 		flex-wrap: wrap;
 	}
-	.hint { font-size: 11px; color: #8a8490; margin-right: auto; }
+	.hint {
+		font-size: 11px;
+		color: var(--muted);
+		margin-right: auto;
+	}
 	.edit-actions button {
 		font-size: 13px;
 		padding: 4px 12px;
 		border-radius: 6px;
-		border: 1px solid #d4d2d8;
-		background: #fff;
+		border: 1px solid var(--line);
+		background: var(--panel);
 		cursor: pointer;
 		font-weight: 600;
-		color: #4a4550;
+		color: var(--muted);
 	}
-	.edit-actions button[disabled] { opacity: 0.5; cursor: default; }
-	.edit-actions button:first-of-type { background: #9b1c3a; color: white; border-color: #9b1c3a; }
-	.edit-actions button:first-of-type:hover:not([disabled]) { background: #7d1630; }
+	.edit-actions button[disabled] {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.edit-actions button:first-of-type {
+		background: var(--accent);
+		color: white;
+		border-color: var(--accent);
+	}
+	.edit-actions button:first-of-type:hover:not([disabled]) {
+		background: var(--accent-h);
+	}
 
+	@media (hover: none) {
+		.message .msg-actions {
+			position: static;
+			grid-column: 2/-1;
+			opacity: 1;
+			pointer-events: auto;
+			flex-wrap: wrap;
+		}
+	}
 	/* Floating action toolbar */
 	.msg-actions {
 		display: flex;
@@ -921,13 +1093,16 @@
 		position: absolute;
 		top: -20px;
 		right: 16px;
-		background: white;
-		border: 1px solid #ebebed;
+		background: var(--panel);
+		border: 1px solid var(--line);
 		border-radius: 8px;
 		padding: 3px;
-		box-shadow: 0 4px 12px rgba(0,0,0,0.10), 0 0 0 1px rgba(0,0,0,0.06);
+		box-shadow:
+			0 4px 12px rgba(0, 0, 0, 0.1),
+			0 0 0 1px rgba(0, 0, 0, 0.06);
 		z-index: 2;
 	}
+	.message:focus-within .msg-actions,
 	.message:hover .msg-actions {
 		opacity: 1;
 		pointer-events: all;
@@ -942,36 +1117,20 @@
 		border-radius: 6px;
 		font-size: 14px;
 		cursor: pointer;
-		color: #4a4550;
+		color: var(--muted);
 		transition: background 0.1s;
 		padding: 0;
 		min-height: 0;
 	}
-	.action-btn:hover { background: #f3f2f5; }
-	.action-btn.danger:hover { background: #fdf2f5; color: #9b1c3a; }
+	.action-btn:hover {
+		background: var(--well);
+	}
+	.action-btn.danger:hover {
+		background: var(--selected);
+		color: var(--accent);
+	}
 
 	/* Emoji picker */
-	.emoji-picker {
-		display: flex;
-		gap: 4px;
-		padding: 4px 68px;
-		animation: fadeIn 0.1s ease;
-	}
-	.emoji-picker button {
-		width: 34px;
-		height: 34px;
-		border: 1px solid transparent;
-		border-radius: 8px;
-		background: transparent;
-		font-size: 18px;
-		cursor: pointer;
-		display: grid;
-		place-items: center;
-		transition: background 0.1s;
-		padding: 0;
-		min-height: 0;
-	}
-	.emoji-picker button:hover { background: #f3f2f5; border-color: #d4d2d8; }
 
 	/* Reply bar */
 	.reply-bar {
@@ -979,21 +1138,26 @@
 		align-items: center;
 		gap: 8px;
 		padding: 7px 16px;
-		background: #fdf2f5;
-		border-top: 1px solid #f0dde3;
-		border-left: 3px solid #9b1c3a;
+		background: var(--selected);
+		border-top: 1px solid var(--selected);
+		border-left: 3px solid var(--accent);
 		font-size: 13px;
-		color: #6b6459;
+		color: var(--muted);
 		flex-shrink: 0;
 		animation: slideUp 0.1s ease;
 	}
-	.reply-bar-icon { font-size: 15px; color: #9b1c3a; }
-	.reply-bar strong { color: #1a1a1a; }
+	.reply-bar-icon {
+		font-size: 15px;
+		color: var(--accent);
+	}
+	.reply-bar strong {
+		color: var(--ink);
+	}
 	.reply-bar button {
 		margin-left: auto;
 		border: 0;
 		background: transparent;
-		color: #9b8e84;
+		color: var(--muted);
 		cursor: pointer;
 		font-size: 16px;
 		line-height: 1;
@@ -1001,7 +1165,10 @@
 		border-radius: 4px;
 		min-height: 0;
 	}
-	.reply-bar button:hover { background: #f0dde3; color: #1a1a1a; }
+	.reply-bar button:hover {
+		background: var(--selected);
+		color: var(--ink);
+	}
 
 	/* Composer */
 	.composer {
@@ -1009,14 +1176,14 @@
 		align-items: flex-end;
 		gap: 8px;
 		padding: 8px 16px 12px;
-		border-top: 1px solid #ebebed;
+		border-top: 1px solid var(--line);
 		flex-shrink: 0;
-		background: #fff;
+		background: var(--panel);
 	}
-	.composer textarea {
+	.composer :global(textarea) {
 		flex: 1;
 		min-width: 0;
-		border: 1px solid #e0dde5;
+		border: 1px solid var(--line);
 		border-radius: 12px;
 		padding: 10px 14px;
 		font: inherit;
@@ -1025,64 +1192,95 @@
 		overflow: hidden;
 		line-height: 1.5;
 		max-height: 200px;
-		transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
-		background: #f3f2f5;
-		color: #0f0d10;
+		transition:
+			border-color 0.15s,
+			background 0.15s,
+			box-shadow 0.15s;
+		background: var(--well);
+		color: var(--ink);
 	}
-	.composer textarea:focus {
+	.composer :global(textarea:focus) {
 		outline: none;
-		border-color: #9b1c3a;
-		background: #fff;
-		box-shadow: 0 0 0 2px rgba(155,28,58,0.15);
+		border-color: var(--accent);
+		background: var(--panel);
+		box-shadow: 0 0 0 2px var(--selected);
 	}
-	.composer textarea::placeholder { color: #8a8490; }
-	.composer.archived textarea {
-		background: #f9f8fa;
-		color: #8a8490;
+	.composer :global(textarea::placeholder) {
+		color: var(--muted);
+	}
+	.composer.archived :global(textarea) {
+		background: var(--hover);
+		color: var(--muted);
 	}
 	.send-btn {
 		width: 36px;
 		height: 36px;
 		border-radius: 50%;
 		border: 0;
-		background: #9b1c3a;
+		background: var(--accent);
 		color: white;
 		cursor: pointer;
 		display: grid;
 		place-items: center;
 		flex-shrink: 0;
-		transition: background 0.1s, transform 0.1s;
+		transition:
+			background 0.1s,
+			transform 0.1s;
 		padding: 0;
 	}
-	.send-btn:hover:not([disabled]) { background: #7d1630; transform: scale(1.05); }
-	.send-btn[disabled] { background: #d4d2d8; color: #8a8490; cursor: default; }
+	.send-btn:hover:not([disabled]) {
+		background: var(--accent-h);
+		transform: scale(1.05);
+	}
+	.send-btn[disabled] {
+		background: var(--line);
+		color: var(--muted);
+		cursor: default;
+	}
 
 	.error {
 		padding: 8px 16px;
 		font-size: 13px;
-		color: #9b1c3a;
-		background: #fdf2f5;
-		border-bottom: 1px solid #f0dde3;
+		color: var(--accent);
+		background: var(--selected);
+		border-bottom: 1px solid var(--selected);
 		flex-shrink: 0;
 	}
 
 	/* Animations */
 	@keyframes slideDown {
-		from { opacity: 0; transform: translateY(-6px); }
-		to { opacity: 1; transform: translateY(0); }
+		from {
+			opacity: 0;
+			transform: translateY(-6px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
 	}
 	@keyframes slideUp {
-		from { opacity: 0; transform: translateY(4px); }
-		to { opacity: 1; transform: translateY(0); }
+		from {
+			opacity: 0;
+			transform: translateY(4px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
 	}
 	@keyframes fadeIn {
-		from { opacity: 0; }
-		to { opacity: 1; }
+		from {
+			opacity: 0;
+		}
+		to {
+			opacity: 1;
+		}
 	}
 
 	/* Focus styles */
-	button:focus-visible, textarea:focus-visible, input:focus-visible {
-		outline: 2px solid #9b1c3a;
+	button:focus-visible,
+	.chat :global(textarea:focus-visible) {
+		outline: 2px solid var(--accent);
 		outline-offset: 2px;
 	}
 </style>

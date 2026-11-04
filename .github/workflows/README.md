@@ -3,7 +3,6 @@
 - `ci.yml` installs locked dependencies and runs `just check` on every pull request and push to `develop` or `main`.
 - `compose.yml` builds the four-service local topology, waits for healthy containers, and checks the frontend and API liveness endpoint.
 - `ci.yml` builds the warning-free Sphinx documentation as part of `just check`. The documentation is not published anywhere.
-- `nix.yml` evaluates the pinned Nix development shell.
 
 There is no automatic deployment. AWS is applied by hand with `just aws-*` from a checkout with credentials, so GitHub Actions needs no deployment secrets of any kind.
 
@@ -11,7 +10,6 @@ Configure the `develop` and `main` branches to require these checks before mergi
 
 - `Repository checks`
 - `Container smoke test`
-- `Nix flake`
 
 Require resolved conversations and disable force pushes and branch deletion. GitHub does not permit pull-request authors to approve their own work, so a solo maintainer must use zero required approvals. Teams with an independent reviewer can require one or more approvals.
 
