@@ -1,18 +1,25 @@
-"""Public study-spot routes."""
+"""Study-spot routes: the public read routes and a business owner's listings."""
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from django.db.models import Count, Q, QuerySet
-from rest_framework.exceptions import NotFound
+from rest_framework import status
+from rest_framework.exceptions import NotFound, PermissionDenied
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from accounts.authentication import Auth0Authentication
+from accounts.models import Account, AccountType
+
 from .models import StudySpot
 from .search import expanded_words, search
 from .serializers import (
+    ListingSerializer,
     SpotFacetsQuerySerializer,
     SpotQuerySerializer,
     SpotSearchQuerySerializer,
@@ -257,3 +264,65 @@ class SpotFacetsView(APIView):
         body["indoor_seating"] = narrow("indoor_seating").filter(indoor_seating=True).count()
 
         return Response(body)
+
+
+#: Prefix of the identifiers given to owner-created listings, in the same
+#: ``source:key`` form as the importer's ``facdb:`` and ``dohmh:``, so that no
+#: listing can take the identifier of an imported spot.
+LISTING_ID_PREFIX = "listing"
+
+
+def business_account(request: Request) -> Account:
+    """The caller's account, provided it is a business account."""
+    account: Account = request.user.account
+    if account.account_type != AccountType.BUSINESS:
+        raise PermissionDenied("Only a business account can manage listings.")
+    return account
+
+
+def owned_listing(request: Request, spot_id: str) -> StudySpot:
+    """The listing ``spot_id``, provided the caller's business account owns it.
+
+    Someone else's listing and an imported spot are both answered as not found:
+    from here, the caller has no listing by that identifier.
+    """
+    account = business_account(request)
+    try:
+        return StudySpot.objects.get(pk=spot_id, owner=account)
+    except StudySpot.DoesNotExist:
+        raise NotFound(f"You have no listing with the identifier {spot_id!r}.") from None
+
+
+class ListingListView(APIView):
+    """``GET /listings`` and ``POST /listings`` -- the caller's own listings."""
+
+    authentication_classes = [Auth0Authentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request: Request) -> Response:
+        listings = StudySpot.objects.filter(owner=business_account(request))
+        return Response({"items": StudySpotSerializer(listings, many=True).data})
+
+    def post(self, request: Request) -> Response:
+        account = business_account(request)
+        serializer = ListingSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        spot = serializer.save(id=f"{LISTING_ID_PREFIX}:{uuid.uuid4().hex}", owner=account)
+        return Response(StudySpotSerializer(spot).data, status=status.HTTP_201_CREATED)
+
+
+class ListingDetailView(APIView):
+    """``PATCH`` and ``DELETE /listings/{id}`` -- one of the caller's own listings."""
+
+    authentication_classes = [Auth0Authentication]
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request: Request, spot_id: str) -> Response:
+        spot = owned_listing(request, spot_id)
+        serializer = ListingSerializer(spot, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(StudySpotSerializer(serializer.save()).data)
+
+    def delete(self, request: Request, spot_id: str) -> Response:
+        owned_listing(request, spot_id).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

@@ -10,6 +10,8 @@ OpenStreetMap  --- data/ingest.py -> data/spots.json -> Postgres -> API
 
 The snapshot holds 3,772 third places across the five boroughs: 3,509 cafés, 227 public library branches, 21 special libraries, 7 academic libraries and 8 NYU campus buildings. The city's 126 campus records are read but not published: an institution's administrative point is not a room, and access to a campus is restricted. They anchor the "near which campus" label instead. These are candidate locations, not guarantees of Wi-Fi, outlets, seating, quietness, or availability.
 
+The **Cost policy** filter offers **Any cost**, **Free**, and **Purchase required**. Free sends `no_purchase_needed=true`, excluding spots marked as requiring a purchase; Purchase required sends `no_purchase_needed=false`, showing only those spots. Any cost removes the restriction. The policy combines with search and other filters and applies to both list and map results. “Free” describes cost, not unrestricted entry: campus buildings can still require credentials.
+
 The directory intentionally stays small:
 
 - `README.md` documents the boundary, including where the records come from and what each field means.

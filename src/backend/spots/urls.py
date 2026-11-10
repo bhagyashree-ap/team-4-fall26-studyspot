@@ -10,9 +10,20 @@ matches anything except a slash.
 
 from django.urls import path
 
-from .views import SpotDetailView, SpotFacetsView, SpotListView, SpotSearchView
+from .views import (
+    ListingDetailView,
+    ListingListView,
+    SpotDetailView,
+    SpotFacetsView,
+    SpotListView,
+    SpotSearchView,
+)
 
 urlpatterns = [
+    # A business owner's own listings. Separate from /spots, which stays public
+    # and read-only; a listing is read there like any other spot.
+    path("listings", ListingListView.as_view(), name="listing-list"),
+    path("listings/<str:spot_id>", ListingDetailView.as_view(), name="listing-detail"),
     path("spots", SpotListView.as_view(), name="spot-list"),
     # Before the detail route: Django matches in order, and <str:spot_id> would
     # otherwise capture "search" and look for a spot with that identifier.

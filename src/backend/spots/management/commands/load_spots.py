@@ -147,7 +147,7 @@ def to_spot(record: Any, index: int) -> StudySpot:
 
 
 class Command(BaseCommand):
-    help = "Replace the spots table with the contents of a normalized snapshot."
+    help = "Replace the imported spots with the contents of a normalized snapshot."
 
     def add_arguments(self, parser: Any) -> None:
         parser.add_argument(
@@ -172,9 +172,13 @@ class Command(BaseCommand):
         with transaction.atomic():
             # The table is a rebuildable projection, so a record dropped
             # upstream must disappear here too. That is why this replaces rather
-            # than upserts.
-            StudySpot.objects.all().delete()
+            # than upserts. Listings a business account owns are not part of
+            # the snapshot, so they are left alone.
+            StudySpot.objects.filter(owner__isnull=True).delete()
             StudySpot.objects.bulk_create(spots, batch_size=BATCH_SIZE)
 
-        written = StudySpot.objects.count()
+        # `len(spots)` rather than a table count: the delete above leaves owned
+        # listings in place, and counting the table would fold them into a
+        # number that reports what this snapshot loaded.
+        written = len(spots)
         self.stdout.write(self.style.SUCCESS(f"loaded {written} spots from {dataset}"))

@@ -257,8 +257,8 @@ variable "django_csrf_trusted_origins" {
     Origins allowed to submit session-authenticated writes, as full origins such
     as https://d111111abcdef8.cloudfront.net.
 
-    Needed only once the admin or another session-authenticated write exists. It
-    is a variable rather than a reference to the distribution because the
+    Required for guest communities and chat, whose writes are
+    session-authenticated, and for the admin. It is a variable rather than a reference to the distribution because the
     distribution depends on the function URL, and reading its domain from the
     function's environment would be a dependency cycle: apply once, then add the
     printed domain here.
@@ -278,6 +278,16 @@ variable "django_enable_admin" {
 }
 
 # -- Accounts ------------------------------------------------------------------
+
+variable "accounts_enabled" {
+  description = <<-EOT
+    Whether sign-in through Auth0 is switched on. Off for now, while communities
+    and chat are open to guests; the auth0_* values below take effect only when
+    this is true.
+  EOT
+  type        = bool
+  default     = false
+}
 
 variable "auth0_domain" {
   description = <<-EOT

@@ -4,10 +4,20 @@ from rest_framework.test import APIClient
 from communities.services import create_guest_community
 
 
+@pytest.fixture(autouse=True)
+def accounts_required(settings):
+    """Run each test with sign-in required unless it opens guest access itself.
+
+    Guest access is on by default, but most of these tests exercise the account
+    rules, which apply whenever it is switched off.
+    """
+    settings.CHAT_GUEST_ACCESS = False
+
+
 @pytest.fixture
 def existing_guest_community(db, settings):
     """A guest-owned group and browser session created before sign-in was required."""
-    settings.CHAT_GUEST_DEMO = True
+    settings.CHAT_GUEST_ACCESS = True
     owner = APIClient(enforce_csrf_checks=True)
     session = owner.session
     identity = "existing-guest"

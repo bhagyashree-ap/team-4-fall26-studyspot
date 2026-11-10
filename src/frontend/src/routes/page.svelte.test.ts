@@ -288,15 +288,6 @@ describe('the filter counts', () => {
 		expect(latest.parameters.get('q')).toBe('library');
 	});
 
-	it('put the no-purchase count on its checkbox', async () => {
-		// Not any one category: true of every library and of the campus
-		// buildings, false only of cafes, so it cannot be read off the Type
-		// control.
-		render(Home);
-
-		await expect.element(page.getByText('(56)')).toBeInTheDocument();
-	});
-
 	it('put the Wi-Fi count on its checkbox', async () => {
 		// A checkbox has no list of values, so the count is how many of the
 		// matching spots have Wi-Fi -- the answer to "is this worth ticking".

@@ -57,7 +57,12 @@ class Identity:
 
 def configured() -> bool:
     """Whether accounts are switched on in this environment."""
-    return bool(settings.AUTH0_DOMAIN and settings.AUTH0_CLIENT_ID and settings.AUTH0_AUDIENCE)
+    return bool(
+        settings.ACCOUNTS_ENABLED
+        and settings.AUTH0_DOMAIN
+        and settings.AUTH0_CLIENT_ID
+        and settings.AUTH0_AUDIENCE
+    )
 
 
 def issuer() -> str:

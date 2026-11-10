@@ -41,7 +41,7 @@
 		The row wrappers and the `.switch` span below are not decoration: the
 		stylesheet is written around them. `.toggle input` is deliberately
 		hidden -- 1x1px at opacity 0 -- so that `.switch` can be the visible
-		control, and without it the three toggles rendered as plain text with
+		control, and without it the toggles rendered as plain text with
 		no box, no checked state and no focus ring. They still worked, which is
 		why it was easy to miss.
 
@@ -128,24 +128,20 @@
 			<span class="switch" aria-hidden="true"></span>
 		</label>
 
-		<label class="toggle">
-			<input
-				type="checkbox"
-				checked={filters.no_purchase_needed === true}
-				onchange={(event) => set({ no_purchase_needed: event.currentTarget.checked || undefined })}
-			/>
-			<!--
-			The question a student actually asks, and not any one type: it is
-			true of every library and of the campus buildings, false only of
-			cafés. About money rather than entry.
-		-->
-			<span>
-				No purchase needed
-				{#if facets}
-					<span class="count">({facets.no_purchase_needed})</span>
-				{/if}
-			</span>
-			<span class="switch" aria-hidden="true"></span>
+		<label class="field">
+			<span>Cost policy</span>
+			<select
+				value={filters.no_purchase_needed === undefined ? '' : String(filters.no_purchase_needed)}
+				onchange={(event) =>
+					set({
+						no_purchase_needed:
+							event.currentTarget.value === '' ? undefined : event.currentTarget.value === 'true'
+					})}
+			>
+				<option value="">Any cost</option>
+				<option value="true">Free</option>
+				<option value="false">Purchase required</option>
+			</select>
 		</label>
 
 		<label class="toggle">
@@ -158,12 +154,9 @@
 			"Indoor seating", matching the badge on the result card, rather than
 			"Indoor seating recorded".
 
-			The longer label was trying to carry a real caveat: unlike the two
-			above it, this field is unrecorded for most spots, so ticking it
-			hides the places nobody has mapped as well as the places with
-			nowhere to sit. The count does that job instead, and does it
-			better -- (112) against (567) and (263) says plainly that this one
-			narrows hard, and it says it before you tick.
+			This field is unrecorded for most spots, so ticking it hides places
+			nobody has mapped as well as places with nowhere to sit. The count
+			shows how many spots have recorded indoor seating.
 		-->
 			<span>
 				Indoor seating

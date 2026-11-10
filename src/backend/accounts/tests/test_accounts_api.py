@@ -46,6 +46,7 @@ def signing_key() -> rsa.RSAPrivateKey:
 
 @pytest.fixture(autouse=True)
 def auth0(settings: Any, signing_key: rsa.RSAPrivateKey) -> Iterator[None]:
+    settings.ACCOUNTS_ENABLED = True
     settings.AUTH0_DOMAIN = DOMAIN
     settings.AUTH0_CLIENT_ID = "spa-client-id"
     settings.AUTH0_AUDIENCE = AUDIENCE
@@ -100,8 +101,11 @@ class TestAuthConfig:
             "audience": AUDIENCE,
         }
 
-    def test_reports_disabled_when_unconfigured(self, client: Any, settings: Any) -> None:
-        settings.AUTH0_DOMAIN = ""
+    @pytest.mark.parametrize(("name", "value"), [("AUTH0_DOMAIN", ""), ("ACCOUNTS_ENABLED", False)])
+    def test_reports_disabled_when_unconfigured_or_switched_off(
+        self, client: Any, settings: Any, name: str, value: object
+    ) -> None:
+        setattr(settings, name, value)
 
         assert client.get("/auth/config").json() == {"enabled": False}
 
@@ -169,10 +173,13 @@ class TestAuthentication:
 
         assert client.get("/account", **bearer(unsigned)).status_code == 401
 
+    @pytest.mark.parametrize(
+        ("name", "value"), [("AUTH0_AUDIENCE", ""), ("ACCOUNTS_ENABLED", False)]
+    )
     def test_rejects_tokens_when_accounts_are_off(
-        self, client: Any, token: Token, settings: Any
+        self, client: Any, token: Token, settings: Any, name: str, value: object
     ) -> None:
-        settings.AUTH0_AUDIENCE = ""
+        setattr(settings, name, value)
 
         assert client.get("/account", **bearer(token())).status_code == 401
 

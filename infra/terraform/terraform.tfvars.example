@@ -5,6 +5,13 @@
 environment = "staging"
 region      = "us-east-2"
 
+# -- Guest communities and chat ------------------------------------------------
+#
+# Guest writes are session-authenticated, so Django's CSRF check needs the
+# distribution's origin. Apply once, then add the domain it prints.
+#
+# django_csrf_trusted_origins = ["https://d111111abcdef8.cloudfront.net"]
+
 # -- Reaching the database from outside the VPC --------------------------------
 #
 # The database is private by default, which is why migrations and data loads run
@@ -20,7 +27,11 @@ region      = "us-east-2"
 
 # -- Accounts ------------------------------------------------------------------
 #
-# Leave these out and accounts stay switched off. docs/source/accounts.md walks
+# Sign-in is switched off for now. Set accounts_enabled = true with these to turn
+# it on; leave them out and accounts stay switched off.
+#
+# accounts_enabled = true
+# docs/source/accounts.md walks
 # through creating the Auth0 tenant they come from. The keys are fetched once:
 #
 #     curl -s https://studyspot.us.auth0.com/.well-known/jwks.json

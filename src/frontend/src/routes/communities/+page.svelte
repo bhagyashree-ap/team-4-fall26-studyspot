@@ -1441,7 +1441,7 @@
 										<span style:background={avatarColor(selfName)}>{initials(selfName)}</span>
 										<div>
 											<strong>{selfName}</strong><small
-												>{guestPreview ? 'Demo session' : 'Your profile'}</small
+												>{guestPreview ? 'Guest session' : 'Your profile'}</small
 											>
 										</div>
 									</div>{/if}

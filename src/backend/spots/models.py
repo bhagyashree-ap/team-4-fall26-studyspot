@@ -25,6 +25,24 @@ MAX_LIMIT = 100
 #: Filter values are trimmed, must not be blank, and are bounded.
 MAX_FILTER_LENGTH = 120
 
+#: The categories a business owner may give a listing they create.
+#:
+#: Only ``cafe``. The importer's other four values -- ``public_library``,
+#: ``academic_library``, ``special_library`` and ``university_building`` --
+#: name institutions and reach this table from city and university datasets.
+#: A business account that could choose one would present itself to students
+#: as a public library.
+#:
+#: Deliberately not ``choices`` on ``StudySpot.category``: as that model's
+#: docstring says, the vocabulary belongs to the importer, and a city dataset
+#: may introduce a value without the API having to change. What this bounds is
+#: only what an *owner* may write, because ``category`` is a facet --
+#: ``GET /spots/facets`` groups by it and the frontend renders the result as a
+#: filter control. A listing free to invent "coffee shop" would add an option to
+#: every visitor's filter list, and "Cafe", "cafe" and "Coffee Shop" would
+#: become three.
+LISTING_CATEGORIES = ("cafe",)
+
 
 class Borough(models.TextChoices):
     """The five New York City boroughs."""
@@ -257,6 +275,22 @@ class StudySpot(models.Model):
             "nothing. Null for every spot no contributor has recorded hours for, "
             "which is every library -- no city source publishes a schedule."
         ),
+    )
+
+    #: The business account that manages this spot, or null for a spot the
+    #: importer took from a city dataset. Null is the common case and means
+    #: "nobody on StudySpot manages it", not "unknown".
+    #:
+    #: Cascades because an owned listing has no source but its owner: with the
+    #: account gone nobody could correct or remove it, and the next
+    #: ``load_spots`` would not restore it either.
+    owner = models.ForeignKey(
+        "accounts.Account",
+        on_delete=models.CASCADE,
+        blank=True,
+        null=True,
+        related_name="listings",
+        help_text="The business account that manages this listing; null for imported spots.",
     )
 
     #: What free-text search matches against, maintained by Postgres rather

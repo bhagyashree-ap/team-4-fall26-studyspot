@@ -15,6 +15,10 @@ No route has a trailing slash, and the application does not redirect one onto th
 | `GET /account` | The logged-in person's account. Needs a bearer token. |
 | `POST /account` | Finishes sign-up as a student or a business. Needs a bearer token. |
 | `GET /usernames/{username}` | Whether a username is free to choose. |
+| `GET /listings` | The caller's own listings. Needs a bearer token for a business account. |
+| `POST /listings` | Creates a listing owned by the caller. Needs a bearer token for a business account. |
+| `PATCH /listings/{id}` | Updates one of the caller's own listings. Needs a bearer token for a business account. |
+| `DELETE /listings/{id}` | Deletes one of the caller's own listings. Needs a bearer token for a business account. |
 
 `GET /health/live` returns:
 
@@ -164,7 +168,8 @@ Every non-2xx response uses one envelope:
 | Status | `code` | Raised when |
 |---|---|---|
 | 401 | `unauthorized` | An account route was called without a bearer token, or with one that does not verify. |
-| 404 | `not_found` | No spot has the requested identifier. |
+| 403 | `forbidden` | A listing route was called by an account that is not a business account. |
+| 404 | `not_found` | No spot has the requested identifier, or the caller owns no listing with it. |
 | 405 | `method_not_allowed` | The route exists but the method does not. |
 | 409 | `conflict` | Sign-up was already finished for this account. |
 | 422 | `validation_error` | A parameter is missing, malformed, out of range, or unrecognized. |
@@ -354,6 +359,21 @@ than only on submit.
 The relevance score is not in the response. It exists to order results, and
 publishing it would be a number the contract has to keep stable for no one's
 benefit.
+
+## Managing listings
+
+A business account can list its own study space. A listing is an ordinary spot to every reader: it appears in `GET /spots`, search and facets, in the same summary shape, with an identifier prefixed `listing:`. The owner is not part of that shape.
+
+`POST /listings` takes a JSON body with `name`, `category`, `borough`, `latitude` and `longitude`, and optionally `address`, `neighborhood`, `no_purchase_needed`, `indoor_seating`, `venue_wifi` and `opening_hours`. `PATCH /listings/{id}` takes any subset of the same fields. Both answer with the spot summary. Any other field is rejected with a 422, including the ones the importer derives from city data, such as `subway_station` or `free_public_wifi`. Those stay at their defaults for a listing.
+
+```shell
+curl -X POST http://localhost:7501/listings \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "Quiet Corner Cafe", "category": "cafe", "borough": "Manhattan",
+       "latitude": 40.7259, "longitude": -73.9946}'
+```
+
+A listing that belongs to another account, and every imported spot, answers 404 to `PATCH` and `DELETE`. `just load-data` replaces only the imported spots, so it keeps listings.
 
 ## Planned routes
 

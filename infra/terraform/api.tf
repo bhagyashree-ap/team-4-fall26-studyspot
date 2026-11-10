@@ -83,15 +83,18 @@ locals {
     # it would add nothing to the SigV4 signature already required.
     DJANGO_ALLOWED_HOSTS = var.django_allowed_hosts
 
-    # Empty until you enable the admin, at which point this wants the
-    # distribution's own domain. It is a variable rather than a reference to the
+    # Wants the distribution's own domain: guest community and chat writes are
+    # session-authenticated and refused by CSRF without it, as is the admin. It is a variable rather than a reference to the
     # distribution because the distribution depends on the function URL, and
     # reading its domain here would be a dependency cycle.
     DJANGO_CSRF_TRUSTED_ORIGINS = join(",", var.django_csrf_trusted_origins)
 
     DJANGO_ENABLE_ADMIN = tostring(var.django_enable_admin)
 
-    # Accounts. Blank leaves them switched off; see docs/source/accounts.md.
+    # Accounts. Off unless accounts_enabled, and blank Auth0 settings also leave
+    # them switched off; see docs/source/accounts.md.
+    STUDYSPOT_ACCOUNTS = tostring(var.accounts_enabled)
+
     AUTH0_DOMAIN    = var.auth0_domain
     AUTH0_CLIENT_ID = var.auth0_client_id
     AUTH0_AUDIENCE  = var.auth0_audience

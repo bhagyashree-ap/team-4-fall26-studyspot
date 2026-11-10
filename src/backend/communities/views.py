@@ -52,7 +52,7 @@ class CommunityView(APIView):
 
     def check_permissions(self, request: Request) -> None:
         super().check_permissions(request)
-        if not settings.CHAT_GUEST_DEMO:
+        if not settings.CHAT_GUEST_ACCESS:
             actor(request)
 
 
@@ -91,7 +91,7 @@ def counted_communities():
 
 
 def viewer(request: Request, community: Community):
-    if not settings.CHAT_GUEST_DEMO or getattr(request.user, "is_authenticated", False):
+    if not settings.CHAT_GUEST_ACCESS or getattr(request.user, "is_authenticated", False):
         return request.user
     if community.owner_id is None and community.pk in request.session.get("guest_communities", []):
         return GuestOwner(community.pk)
@@ -146,12 +146,12 @@ class CommunityAccess(APIView):
     def get(self, request: Request) -> Response:
         # First-time invite recipients need a CSRF cookie before redeeming.
         get_token(request._request)
-        return Response({"guest_preview": settings.CHAT_GUEST_DEMO})
+        return Response({"guest_preview": settings.CHAT_GUEST_ACCESS})
 
 
 class CommunityList(CommunityView):
     def get(self, request: Request) -> Response:
-        if not settings.CHAT_GUEST_DEMO or request.user:
+        if not settings.CHAT_GUEST_ACCESS or request.user:
             actor(request)
         get_token(request._request)
         limit, offset = page(request)
@@ -219,7 +219,7 @@ class CommunityList(CommunityView):
         )
 
     def post(self, request: Request) -> Response:
-        user = None if settings.CHAT_GUEST_DEMO and not request.user else actor(request)
+        user = None if settings.CHAT_GUEST_ACCESS and not request.user else actor(request)
         parsed = CommunityWriteSerializer(data=request.data)
         parsed.is_valid(raise_exception=True)
         if user is None:

@@ -12,9 +12,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
 
+from accounts.models import Account, AccountType
 from spots.models import StudySpot
 
 from .test_spots_api import RECORDS
@@ -55,6 +57,27 @@ class TestLoading:
         load(write_snapshot(tmp_path, RECORDS))
         load(write_snapshot(tmp_path, []))
         assert StudySpot.objects.count() == 0
+
+    def test_keeps_listings_a_business_owns(self, tmp_path: Path) -> None:
+        # Owned listings are not in the snapshot, so replacing the projection
+        # must not take them with it.
+        user = get_user_model().objects.create(username="auth0|owner")
+        owner = Account.objects.create(
+            user=user, account_type=AccountType.BUSINESS, business_name="Corner Cafe"
+        )
+        StudySpot.objects.create(
+            id="listing:corner",
+            name="Corner Cafe",
+            category="cafe",
+            borough="Manhattan",
+            latitude=40.7259,
+            longitude=-73.9946,
+            owner=owner,
+        )
+
+        load(write_snapshot(tmp_path, []))
+
+        assert list(StudySpot.objects.values_list("pk", flat=True)) == ["listing:corner"]
 
     def test_a_record_without_a_university_loads(self, tmp_path: Path) -> None:
         # Snapshots produced before the field existed omit it entirely.

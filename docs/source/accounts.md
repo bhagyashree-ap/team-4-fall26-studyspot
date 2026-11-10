@@ -6,7 +6,7 @@ Sign-up starts on StudySpot's own page, `/signup`. It asks whether the account i
 
 StudySpot keeps an `Account` row per person, recording whether they are a student or a business owner.
 
-Accounts are optional for running the site. With no Auth0 settings, `GET /auth/config` reports `{"enabled": false}`, the header shows no log-in controls, and search works exactly as before.
+Accounts are switched off for now: communities and chat are open to guests (see [Communities](communities.md)). Set `STUDYSPOT_ACCOUNTS=true` alongside the Auth0 settings to turn sign-in back on. While it is off, or with no Auth0 settings, `GET /auth/config` reports `{"enabled": false}`, the header shows no log-in controls, bearer tokens are refused with a 401, and search works exactly as before.
 
 ## How it fits together
 
@@ -78,6 +78,7 @@ Auth0's free plan covers this project. Do this once per team; everyone shares th
 
 | Variable | Where | Meaning |
 |---|---|---|
+| `STUDYSPOT_ACCOUNTS` | API | `true` turns sign-in on. Defaults to off, which overrides every setting below. |
 | `AUTH0_DOMAIN` | API | The tenant domain. Blank switches accounts off. |
 | `AUTH0_CLIENT_ID` | API | The SPA's Client ID. Public: the browser reads it from `GET /auth/config`. |
 | `AUTH0_AUDIENCE` | API | The API identifier from step 2. |
@@ -85,7 +86,7 @@ Auth0's free plan covers this project. Do this once per team; everyone shares th
 | `AUTH0_CLAIM_NAMESPACE` | API | Prefix of the Action's claims. Defaults to `https://studyspot.app/`. |
 | `STUDENT_EMAIL_DOMAINS` | API | Comma-separated domain suffixes a student email may end in. Defaults to `edu`. |
 
-The frontend build needs none of these: it asks the API at runtime. Locally, put them in `.env`; `docker compose` and `just dev-backend` both read it. For a deployment, set `auth0_domain`, `auth0_client_id`, `auth0_audience` and `auth0_jwks` in `infra/terraform/terraform.tfvars`:
+The frontend build needs none of these: it asks the API at runtime. Locally, put them in `.env`; `docker compose` and `just dev-backend` both read it. For a deployment, set `accounts_enabled = true` with `auth0_domain`, `auth0_client_id`, `auth0_audience` and `auth0_jwks` in `infra/terraform/terraform.tfvars`:
 
 ```shell
 curl -s https://studyspot.us.auth0.com/.well-known/jwks.json

@@ -80,6 +80,7 @@ def test_existing_guest_owner_can_manage_community(existing_guest_community):
 
 
 def test_auth0_account_can_create_and_manage_community(settings, monkeypatch):
+    settings.ACCOUNTS_ENABLED = True
     settings.AUTH0_DOMAIN = "test.auth0.com"
     settings.AUTH0_CLIENT_ID = "client"
     settings.AUTH0_AUDIENCE = "studyspot"
@@ -252,8 +253,8 @@ def test_member_cap_is_enforced(monkeypatch):
 
 
 @pytest.mark.parametrize("preview", [True, False])
-def test_new_browser_guest_access_is_debug_only_and_requires_csrf(settings, preview):
-    settings.CHAT_GUEST_DEMO = preview
+def test_new_browser_guest_access_follows_its_switch_and_requires_csrf(settings, preview):
+    settings.CHAT_GUEST_ACCESS = preview
     guest = APIClient(enforce_csrf_checks=True)
     assert guest.get("/communities/access").data["guest_preview"] is preview
     assert guest.get("/communities").status_code == (200 if preview else 401)
@@ -281,7 +282,7 @@ def test_preview_does_not_join_or_consume_invite_and_demo_can_be_disabled(
     assert recipient.get(f"/communities/{community}").data["role"] == "visitor"
     assert recipient.post(path + "/redeem").status_code == 200
     assert recipient.get(path).status_code == 404
-    settings.CHAT_GUEST_DEMO = False
+    settings.CHAT_GUEST_ACCESS = False
     for session in (owner, recipient):
         assert session.get(f"/communities/{community}").status_code == 401
         assert session.get("/dms").status_code == 401

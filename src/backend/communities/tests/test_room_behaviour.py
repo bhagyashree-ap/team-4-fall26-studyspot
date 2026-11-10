@@ -181,7 +181,7 @@ def test_direct_reactions_and_pins_are_idempotent_and_participant_only(members):
 
 def test_demo_guest_keeps_the_same_name_in_chat_roster_and_dm(settings, members):
     settings.DEBUG = True
-    settings.CHAT_GUEST_DEMO = True
+    settings.CHAT_GUEST_ACCESS = True
     owner, guest, channel = members
     message = guest.post(channel + "/messages", {"content": "See you at the library"}).data
     name = message["author_name"]

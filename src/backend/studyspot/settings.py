@@ -32,7 +32,13 @@ def _flag(name: str, default: bool = False) -> bool:
 
 
 DEBUG = _flag("DJANGO_DEBUG", default=False)
-CHAT_GUEST_DEMO = DEBUG and _flag("STUDYSPOT_CHAT_DEMO")
+#: Communities and chat are open to anyone, as a guest tied to the browser
+#: session. Set STUDYSPOT_GUEST_CHAT=false to require a signed-in account.
+CHAT_GUEST_ACCESS = _flag("STUDYSPOT_GUEST_CHAT", default=True)
+
+#: Sign-in through Auth0 is switched off until STUDYSPOT_ACCOUNTS=true, even
+#: where the AUTH0_* settings below are filled in.
+ACCOUNTS_ENABLED = _flag("STUDYSPOT_ACCOUNTS", default=False)
 
 # A generated key for local work only. Deployments must supply their own, and a
 # deployment that forgets is better stopped here than left serving signed
@@ -66,7 +72,7 @@ CSRF_TRUSTED_ORIGINS = [
 if DEBUG and "http://localhost:7500" not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append("http://localhost:7500")
 
-if CHAT_GUEST_DEMO:
+if DEBUG and "http://127.0.0.1:7500" not in CSRF_TRUSTED_ORIGINS:
     CSRF_TRUSTED_ORIGINS.append("http://127.0.0.1:7500")
 
 INSTALLED_APPS = [
