@@ -13,7 +13,8 @@ With guest access on, joining, leaving, and invite redemption support guest sess
 | `/communities/{id}/join`, `/leave` | POST | Join or leave with an account or browser session; owners transfer or delete first. |
 | `/communities/{id}/members/{user_id}` | PATCH, DELETE | Owner appoints moderators; owner or moderator kicks eligible members. |
 | `/communities/{id}/transfer` | POST | Owner transfers to a current member. |
-| `/communities/{id}/channels` | POST | Owner creates a channel. |
+| `/communities/{id}/channels` | POST | Any joined member creates a channel; an optional passphrase protects its messages. |
+| `/communities/{id}/channels/{channel_id}/unlock` | POST | A joined member unlocks a passphrase-protected channel for the current browser session. Limited to ten attempts per minute per client IP. |
 | `/communities/{id}/channels/{channel_id}` | PATCH, DELETE | Owner sets the name, topic, slowmode, visibility and posting permissions, reorders channels, or archives, restores or removes a channel. |
 | `/communities/{id}/channels/{channel_id}/messages` | GET, POST | Members read pages of up to 50 messages or post up to 2,000 characters. `before` loads older messages; `after` loads newer ones. |
 | `/communities/{id}/channels/{channel_id}/messages/{message_id}` | GET, PATCH, DELETE | Open a message by ID. Author edits; author or moderator deletes. Deleted messages remain as empty tombstones for replies. |
@@ -36,11 +37,11 @@ With guest access on, joining, leaving, and invite redemption support guest sess
 
 Account owners are stored on the community; guest ownership is in the browser session. Account membership records store `member` or `moderator`; guest memberships have no moderator role. A moderator cannot act against an owner or another moderator. Account bans prevent joining, including through an invite, while public content remains readable. Guest membership cannot be banned reliably because clearing cookies creates a new identity. Invitation tokens are returned once at creation; only their SHA-256 hashes are stored. A maximum-use link increments only for a newly joined account or guest.
 
-The current limits are five owned and 100 joined communities per account or browser session, 1,000 active members, 20 channels and ten active invites per community. Channel names are lowercase letters, digits and hyphens. Invites may expire after one to 720 hours and may cap successful joins at 1,000. These limits live in `communities/services.py` and serializers.
+The current limits are five owned and 100 joined communities per account or browser session, 1,000 active members, 20 channels and ten active invites per community. Channel names are lowercase letters, digits and hyphens. Members may protect a new channel with a passphrase of four to 72 characters; only its hash is stored, and an unlock lasts for the browser session. Owner and moderator access to private channels remains separate from passphrase protection. Invites may expire after one to 720 hours and may cap successful joins at 1,000. These limits live in `communities/services.py` and serializers.
 
 The browser fetches up to 50 channel messages at a time and requests newer IDs every three seconds while visible. It periodically reconciles loaded messages to pick up edits, deletions, pins, votes and reactions. Archived channels remain readable and reject new messages. Guest messages remain after the browser session expires, but the guest can no longer edit them once its membership expires. Clearing cookies loses the ability to manage a guest-created community or its messages.
 
-On the `/communities` landing page, select **Join community** on an Explore card to join and enter its chat. For existing members the same card says **Open community**. The left sidebar lists communities by name. On phones, use the navigation button for communities and direct messages, or the channel button for channels in the current community. A community's Main tab fills the available workspace with channels, chat and a member list on wider screens. Members shows the full paged roster, including guests. Owners use the add button beside Channels to create a channel; Edit channel opens visible rename, archive and delete controls, while the three-dot menu also offers reordering. Deletion asks for confirmation. Share channel copies a URL containing the community and channel IDs; because communities are public, recipients join from that page and then land in the chosen channel. Private conversations are accessible only to their two participants, and a new conversation can be started only with a current member of a shared community. Guest DMs are bound to the browser session, so clearing cookies loses access to them.
+The `/communities` discovery page shows communities in a responsive masonry grid. Search by community, school or course, switch between **Discover** and **My communities**, and use **Load more communities** for further results. Select a card to preview its description, then choose **Join community** to join and enter chat. Joined community cards open chat directly. **Back to top** at the end of discovery returns to the start of the loaded results. **Messages** opens `/messages`, a dedicated screen with a searchable conversation list and a reading pane. Select a person to chat, or select the **Messages** title to return to the welcome view and use **Start a conversation**. On phones, **All messages** returns from the conversation to the list. **Communities** returns to discovery; **Create community** starts a new group. Use **Back to communities** to return to the grid from chat. On phones, use the channel button for channels in the current community. A community's workspace keeps the conversation central, with channels in the left rail and Members or Manage in an on-demand panel. Members shows the full paged roster, including guests. Any joined member can create a text channel from the plus button, optionally protected by a passphrase; the channel creator gets immediate access, and other members unlock it for their current session. Right-click a channel for its action menu. The account card at the bottom of the rail shows the current community role and offers member actions, including leaving the community. Owners and moderators manage community settings; owners edit, archive, reorder and delete channels. Deletion asks for confirmation. Share channel copies a URL containing the community and channel IDs; because communities are public, recipients join from that page and then land in the chosen channel. Direct conversations are accessible only to their two participants. Private group conversations have 3–20 participants, including their creator. The creator must share a community with every person they add; only the selected participants can list, read or post in the group. Guest DMs are bound to the browser session, so clearing cookies loses access to them.
 
 ## Using chat
 
@@ -66,7 +67,7 @@ cd src/backend
 DJANGO_DEBUG=true uv run --env-file ../../.env python manage.py seed_sample_communities --demo-channel 26
 ```
 
-The inbox button opens a scrollable list of unread message cards. Each card opens its message. Right-click a community in the sidebar or open **⋯** beside its name for community actions. To role-play, choose **Invite people**, copy the link into a private browser window and choose **Accept invite**. Owners and moderators can also open **Manage** in the member list to view community settings. Owners can edit details, and changes save automatically.
+The inbox button opens a scrollable list of unread message cards. Each card opens its message. Open **⋯** beside the community name in chat for community actions. To role-play, choose **Invite people**, copy the link into a private browser window and choose **Accept invite**. Owners and moderators can also open **Manage** in the member list to view community settings. Owners can edit details, and changes save automatically.
 
 To run the chat layout checks on a running local frontend with Chrome installed:
 
@@ -78,3 +79,66 @@ bunx bombadil browser test --headless --exit-on-violation --time-limit 30s http:
 Use `--width 390 --height 844` to exercise the mobile navigation. The specification explores visible controls, checks for uncaught errors, and verifies the document and inbox fit the viewport. Set `CHROME` to a Chrome headless shell executable if the default browser cannot capture frames.
 
 With the local demo running and at least one community present, run `node --test qa/community-menu.mjs` from `src/frontend` to check secondary-click menus and keyboard focus in Chromium.
+
+### Local message demo
+
+With `STUDYSPOT_CHAT_DEMO=true` and `DJANGO_DEBUG=true`, open
+<http://localhost:7500/messages> through the frontend development server. The page
+prepares sample Maya Chen and Jordan Rivera conversations for the current browser
+session. They include your own replies, a thread, reactions, a pinned message, a
+poll, a downloadable checklist, and a private **Thursday study crew** group with
+Maya and Jordan. You can send, edit, react, vote and download against the real
+local database. Reloading does not duplicate or reset the samples. A private
+browser window gets its own samples.
+
+The setup endpoint, `POST /chat/demo`, requires CSRF and is available only when
+both debug and guest demo mode are enabled. It is not available in deployments.
+Existing `/communities?dm=ID` links redirect to `/messages?dm=ID`.
+
+Direct conversations use left-aligned incoming bubbles and blue outgoing bubbles.
+The three-dot control beside each message opens reply, thread, pin, reaction,
+copy-link and unread actions; your own messages also offer edit and delete.
+The action control appears on hover or keyboard focus on desktop and stays
+available on touch devices. Escape dismisses the action popover and restores focus.
+Use the three-dot menu on a conversation row to pin it, mark it unread, or delete
+it from your own inbox. Pin and delete preferences are per participant. The sun
+and moon control switches between light and dark themes; the preference is saved
+in this browser.
+
+### Private groups and unread messages
+
+Select **+** beside **Your conversations**, then **New direct message** or
+**New group**. A private group needs a name and 2–19 other people from your shared
+communities. The Messages icon and title both return to the welcome view.
+
+Conversation rows and the Messages icon show unread-count badges. Counts exclude
+your own and deleted messages. The app marks loaded messages as read when you
+reach the bottom; **Mark unread** restores the unread state until you reopen the
+conversation. Reading an older page does not mark newer messages as read.
+
+`POST /dms` creates a private group:
+
+```json
+{
+  "name": "Thursday study crew",
+  "participants": [
+    {"community_id": 1, "target": {"user_id": "12"}},
+    {"community_id": 1, "target": {"guest_member_id": 4}}
+  ]
+}
+```
+
+`PUT /dms/{id}/preferences` accepts `{"pinned": true}` to pin a conversation for
+the current participant. `DELETE /dms/{id}/preferences` removes it from that
+participant's inbox without deleting it for other participants. Conversation list
+items include the participant-specific `pinned` value.
+
+Conversation responses include `kind`, `member_count`, `member_names` and
+`unread_count` alongside the existing fields. `PUT /dms/{id}/read` accepts
+`read_through` to acknowledge a loaded message without marking later messages as
+read. This cursor advances monotonically unless `unread_from` explicitly moves it
+back. The two parameters cannot be combined.
+
+Chat supports Markdown emphasis, links, lists, blockquotes, inline and fenced
+code, and `||spoilers||`. Raw HTML and inline Markdown images are disabled; files
+and images use the attachment control.

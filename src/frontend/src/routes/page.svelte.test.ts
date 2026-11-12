@@ -13,7 +13,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 
 import Home from './+page.svelte';
-import type { Facets, SpotPage, StudySpot } from '$lib/contract';
+import type { Facets, NearbySpotPage, SpotPage, StudySpot } from '$lib/contract';
+import type { NeighborhoodGroup } from '$lib/near';
+
+/** What the build-time loader hands the page: the picker's neighborhoods. */
+const NEIGHBORHOODS: NeighborhoodGroup[] = [
+	{ borough: 'Manhattan', neighborhoods: ['Greenwich Village', 'West Village'] },
+	{ borough: 'Bronx', neighborhoods: ['Allerton'] }
+];
+
+function renderHome() {
+	return render(Home, { data: { neighborhoods: NEIGHBORHOODS }, params: {}, form: undefined });
+}
 
 const FACETS: Facets = {
 	boroughs: [
@@ -64,6 +75,14 @@ function onePage(item: StudySpot, hasMore: boolean): SpotPage {
 	};
 }
 
+/** A page ordered by distance, claiming a second so "Show more" appears. */
+function nearbyPage(item: StudySpot, metres: number, hasMore: boolean): NearbySpotPage {
+	return {
+		items: [{ ...item, distance_metres: metres }],
+		pagination: { limit: 20, offset: 0, count: 1, total: hasMore ? 2 : 1, has_more: hasMore }
+	};
+}
+
 function json(body: unknown): Response {
 	return new Response(JSON.stringify(body), {
 		status: 200,
@@ -106,6 +125,12 @@ beforeEach(() => {
 				: json(onePage(spot('facdb:butler', 'Butler Library'), false));
 		}
 
+		if (url.searchParams.has('near_lat') || url.searchParams.has('near_neighborhood')) {
+			return url.searchParams.get('offset') === '0'
+				? json(nearbyPage(spot('facdb:jefferson', 'Jefferson Market Library'), 412, true))
+				: json(nearbyPage(spot('facdb:hudson', 'Hudson Park Library'), 980, false));
+		}
+
 		return json(onePage(spot('facdb:allerton', 'Allerton Library'), false));
 	}) as typeof globalThis.fetch;
 });
@@ -119,7 +144,7 @@ const searchButton = () => page.getByRole('button', { name: 'Search' });
 
 describe('the search box', () => {
 	it('searches for what it holds when submitted', async () => {
-		render(Home);
+		renderHome();
 
 		await box().fill('library');
 		await searchButton().click();
@@ -130,7 +155,7 @@ describe('the search box', () => {
 	});
 
 	it('stops a filter searching for a word deleted from it', async () => {
-		render(Home);
+		renderHome();
 
 		await box().fill('library');
 		await searchButton().click();
@@ -147,7 +172,7 @@ describe('the search box', () => {
 	});
 
 	it('keeps applying a word that is still showing when a filter changes', async () => {
-		render(Home);
+		renderHome();
 
 		await box().fill('library');
 		await page.getByLabelText(/^Borough/).selectOptions('Bronx');
@@ -159,7 +184,7 @@ describe('the search box', () => {
 	});
 
 	it('clears the results when an emptied box is submitted', async () => {
-		render(Home);
+		renderHome();
 
 		await box().fill('library');
 		await searchButton().click();
@@ -177,7 +202,7 @@ describe('the search box', () => {
 
 describe('paging', () => {
 	it('continues the request the visible results came from', async () => {
-		render(Home);
+		renderHome();
 
 		await box().fill('library');
 		await searchButton().click();
@@ -207,7 +232,7 @@ describe('the place card', () => {
 		});
 
 		try {
-			render(Home);
+			renderHome();
 			await box().fill('library');
 			await searchButton().click();
 			await expect.element(page.getByText('Bobst Library')).toBeInTheDocument();
@@ -227,7 +252,7 @@ describe('the place card', () => {
 	it('offers a link straight into a maps app', async () => {
 		// A hyperlink rather than an embedded map: nothing is loaded from
 		// anyone else to render a card.
-		render(Home);
+		renderHome();
 
 		await box().fill('library');
 		await searchButton().click();
@@ -242,7 +267,7 @@ describe('the place card', () => {
 		// A branch is named after its neighbourhood, so its own name never says
 		// which library system it belongs to -- and the three have separate
 		// membership.
-		render(Home);
+		renderHome();
 
 		await box().fill('library');
 		await searchButton().click();
@@ -258,7 +283,7 @@ function facetRequests() {
 
 describe('the filter counts', () => {
 	it('are fetched for the whole snapshot on arrival', async () => {
-		render(Home);
+		renderHome();
 
 		await expect.element(page.getByLabelText(/^Borough/)).toBeInTheDocument();
 		expect(facetRequests()[0].parameters.toString()).toBe('');
@@ -268,7 +293,7 @@ describe('the filter counts', () => {
 		// The reason this endpoint takes parameters at all: counted over the
 		// whole table, "Academic library (8)" goes on being shown next to a
 		// borough that holds one of them.
-		render(Home);
+		renderHome();
 
 		await page.getByLabelText(/^Borough/).selectOptions('Bronx');
 		await expect.element(page.getByText('Allerton Library')).toBeInTheDocument();
@@ -278,7 +303,7 @@ describe('the filter counts', () => {
 	});
 
 	it('are refetched for the search as well', async () => {
-		render(Home);
+		renderHome();
 
 		await box().fill('library');
 		await searchButton().click();
@@ -291,7 +316,7 @@ describe('the filter counts', () => {
 	it('put the Wi-Fi count on its checkbox', async () => {
 		// A checkbox has no list of values, so the count is how many of the
 		// matching spots have Wi-Fi -- the answer to "is this worth ticking".
-		render(Home);
+		renderHome();
 
 		await expect.element(page.getByText('(34)')).toBeInTheDocument();
 	});
@@ -301,7 +326,7 @@ describe('the filter counts', () => {
 		// real snapshot. The count is doing more work on this checkbox than on
 		// the other two: it is what stops a filter that hides almost everything
 		// from looking broken.
-		render(Home);
+		renderHome();
 
 		await expect.element(page.getByText('(3)')).toBeInTheDocument();
 	});
@@ -328,7 +353,7 @@ describe('the indoor-seating filter', () => {
 	}
 
 	it('asks the API for the spots with a recorded yes', async () => {
-		render(Home);
+		renderHome();
 
 		toggle();
 		await expect.element(page.getByText('Allerton Library')).toBeInTheDocument();
@@ -344,7 +369,7 @@ describe('the indoor-seating filter', () => {
 		// Unticking the last filter takes the page back to idle without
 		// listing, which is how it loads, so the facets request is what shows
 		// the parameter is gone: those are refetched on every filter change.
-		render(Home);
+		renderHome();
 
 		toggle();
 		await expect.poll(() => lastRequest().parameters.get('indoor_seating')).toBe('true');
@@ -357,7 +382,7 @@ describe('the indoor-seating filter', () => {
 
 describe('typing into the box', () => {
 	it('searches once the typing pauses, with nothing submitted', async () => {
-		render(Home);
+		renderHome();
 
 		await box().fill('library');
 
@@ -367,7 +392,7 @@ describe('typing into the box', () => {
 	});
 
 	it('coalesces a burst of keystrokes instead of searching per character', async () => {
-		render(Home);
+		renderHome();
 
 		await box().click();
 		await userEvent.keyboard('library');
@@ -385,7 +410,7 @@ describe('typing into the box', () => {
 		// back on every keystroke. Done carelessly that sends the caret to the
 		// end, so a correction typed into the middle of a word comes out
 		// scrambled. Nothing above would notice, because `fill` appends.
-		render(Home);
+		renderHome();
 
 		const input = box().element() as HTMLInputElement;
 		await box().fill('libary');
@@ -416,7 +441,7 @@ describe('the Map tab in the header', () => {
 		// 3,772 spots. The tab is the one thing that asks for them, because
 		// switching the view with no results behind it would scroll someone to
 		// an empty page and look broken.
-		render(Home);
+		renderHome();
 
 		await openMap();
 
@@ -426,7 +451,7 @@ describe('the Map tab in the header', () => {
 	});
 
 	it('puts those results on the map rather than in cards', async () => {
-		render(Home);
+		renderHome();
 
 		await openMap();
 
@@ -442,7 +467,7 @@ describe('the Map tab in the header', () => {
 	it('maps what a search found rather than starting over', async () => {
 		// Already searched, so the tab switches the view and leaves the results
 		// alone: another request here would replace them with the whole city.
-		render(Home);
+		renderHome();
 
 		await box().fill('library');
 		await searchButton().click();
@@ -452,5 +477,183 @@ describe('the Map tab in the header', () => {
 
 		await expect.element(page.getByRole('button', { name: 'Bobst Library' })).toBeInTheDocument();
 		expect(lastRequest().path).toBe('/api/spots/search');
+	});
+});
+
+describe('Near me', () => {
+	let realGeolocation: PropertyDescriptor | undefined;
+
+	beforeEach(() => {
+		realGeolocation = Object.getOwnPropertyDescriptor(navigator, 'geolocation');
+	});
+
+	afterEach(() => {
+		// Defined on the instance by the stub, so removing it uncovers the
+		// browser's own getter on the prototype again.
+		if (realGeolocation) Object.defineProperty(navigator, 'geolocation', realGeolocation);
+		else delete (navigator as { geolocation?: Geolocation }).geolocation;
+	});
+
+	/** Replace the browser's Geolocation; `undefined` is a browser without one. */
+	function stubGeolocation(answer: Geolocation['getCurrentPosition'] | undefined): void {
+		Object.defineProperty(navigator, 'geolocation', {
+			configurable: true,
+			value: answer === undefined ? undefined : { getCurrentPosition: answer }
+		});
+	}
+
+	function allow(): void {
+		stubGeolocation((success) =>
+			success({ coords: { latitude: 40.7336, longitude: -74.0027 } } as GeolocationPosition)
+		);
+	}
+
+	function refuse(code: number): void {
+		stubGeolocation((_, failure) =>
+			failure?.({
+				code,
+				message: '',
+				PERMISSION_DENIED: 1,
+				POSITION_UNAVAILABLE: 2,
+				TIMEOUT: 3
+			} as GeolocationPositionError)
+		);
+	}
+
+	const nearMe = () => page.getByRole('button', { name: 'Near me' });
+	const picker = () => page.getByLabelText(/^Near neighborhood/);
+
+	it('orders the city by distance from where the browser says you are', async () => {
+		allow();
+		renderHome();
+
+		await nearMe().click();
+
+		await expect.element(page.getByText('400 m from you')).toBeInTheDocument();
+		expect(lastRequest().path).toBe('/api/spots');
+		expect(lastRequest().parameters.get('near_lat')).toBe('40.7336');
+		expect(lastRequest().parameters.get('near_lng')).toBe('-74.0027');
+	});
+
+	it('says what to do when location is refused, and asks the API for nothing', async () => {
+		refuse(1);
+		renderHome();
+
+		await nearMe().click();
+
+		await expect
+			.element(page.getByRole('alert').getByText(/blocked.*neighborhood/))
+			.toBeInTheDocument();
+		expect(calls.some((call) => call.parameters.has('near_lat'))).toBe(false);
+	});
+
+	it('says so when the browser has no location to give', async () => {
+		stubGeolocation(undefined);
+		renderHome();
+
+		await nearMe().click();
+
+		await expect
+			.element(page.getByRole('alert').getByText(/can't share your location/))
+			.toBeInTheDocument();
+	});
+
+	it('suggests trying again when finding the position failed', async () => {
+		refuse(3);
+		renderHome();
+
+		await nearMe().click();
+
+		await expect.element(page.getByRole('alert').getByText(/Try again/)).toBeInTheDocument();
+	});
+
+	it('offers the neighborhoods grouped under their boroughs', async () => {
+		renderHome();
+
+		await expect.element(picker()).toBeInTheDocument();
+		const groups = [...picker().element().querySelectorAll('optgroup')].map((group) => [
+			group.label,
+			[...group.querySelectorAll('option')].map((option) => option.value)
+		]);
+		expect(groups).toEqual([
+			['Manhattan', ['Greenwich Village', 'West Village']],
+			['Bronx', ['Allerton']]
+		]);
+	});
+
+	it('orders by distance from a chosen neighborhood', async () => {
+		renderHome();
+
+		await picker().selectOptions('Greenwich Village');
+
+		await expect.element(page.getByText('400 m from Greenwich Village')).toBeInTheDocument();
+		expect(lastRequest().parameters.get('near_neighborhood')).toBe('Greenwich Village');
+		expect(lastRequest().parameters.has('near_lat')).toBe(false);
+	});
+
+	it('keeps the ordering when the next page is fetched', async () => {
+		renderHome();
+		await picker().selectOptions('Greenwich Village');
+		await expect.element(page.getByText('Jefferson Market Library')).toBeInTheDocument();
+
+		await page.getByRole('button', { name: 'Show more' }).click();
+
+		await expect.element(page.getByText('Hudson Park Library')).toBeInTheDocument();
+		expect(lastRequest().parameters.get('near_neighborhood')).toBe('Greenwich Village');
+		expect(lastRequest().parameters.get('offset')).toBe('1');
+	});
+
+	it('empties the search box, because a search cannot be ordered by distance', async () => {
+		allow();
+		renderHome();
+		await box().fill('library');
+		await expect.element(page.getByText('Bobst Library')).toBeInTheDocument();
+
+		await nearMe().click();
+
+		await expect.element(page.getByText('400 m from you')).toBeInTheDocument();
+		expect((box().element() as HTMLInputElement).value).toBe('');
+		expect(lastRequest().parameters.has('q')).toBe(false);
+	});
+
+	it('ends when a search is typed', async () => {
+		renderHome();
+		await picker().selectOptions('Greenwich Village');
+		await expect.element(page.getByText('Jefferson Market Library')).toBeInTheDocument();
+
+		await box().fill('library');
+
+		await expect.element(page.getByText('Bobst Library')).toBeInTheDocument();
+		expect(lastRequest().path).toBe('/api/spots/search');
+		expect(lastRequest().parameters.has('near_neighborhood')).toBe(false);
+		expect((picker().element() as HTMLSelectElement).value).toBe('');
+	});
+
+	it('survives Clear filters, which only clears the filters', async () => {
+		renderHome();
+		await picker().selectOptions('Greenwich Village');
+		await page.getByLabelText(/^Borough/).selectOptions('Bronx');
+		await expect.poll(() => lastRequest().parameters.get('borough')).toBe('Bronx');
+
+		// A native click, for the reason the indoor-seating toggle above gives:
+		// the button sits below the harness's fold.
+		(page.getByRole('button', { name: 'Clear 1 filter' }).element() as HTMLButtonElement).click();
+
+		await expect.poll(() => lastRequest().parameters.has('borough')).toBe(false);
+		expect(lastRequest().parameters.get('near_neighborhood')).toBe('Greenwich Village');
+	});
+
+	it('can be stopped, which goes back to the usual order', async () => {
+		renderHome();
+		await picker().selectOptions('Greenwich Village');
+		await page.getByLabelText(/^Borough/).selectOptions('Bronx');
+		await expect.poll(() => lastRequest().parameters.get('borough')).toBe('Bronx');
+
+		await page.getByRole('button', { name: 'Stop sorting by distance' }).click();
+
+		await expect.element(page.getByText('Allerton Library')).toBeInTheDocument();
+		expect(lastRequest().parameters.has('near_neighborhood')).toBe(false);
+		expect(lastRequest().parameters.get('borough')).toBe('Bronx');
+		await expect.element(page.getByText(/ m from /)).not.toBeInTheDocument();
 	});
 });

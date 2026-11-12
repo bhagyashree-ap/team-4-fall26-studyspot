@@ -2,6 +2,7 @@
 
 from datetime import timedelta
 
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import serializers
@@ -57,21 +58,36 @@ class ReadMarker(CommunityView):
 
         class Marker(serializers.Serializer):
             unread_from = serializers.IntegerField(min_value=1, required=False)
+            read_through = serializers.IntegerField(min_value=1, required=False)
+
+            def validate(self, attrs):
+                if "unread_from" in attrs and "read_through" in attrs:
+                    raise serializers.ValidationError("Choose either a read or unread marker.")
+                return attrs
 
         parsed = Marker(data=request.data)
         parsed.is_valid(raise_exception=True)
         target = parsed.validated_data.get("unread_from")
-        if target:
-            get_object_or_404(messages, pk=target)
-            last_read = target - 1
-        else:
-            last_read = messages.order_by("-pk").values_list("pk", flat=True).first() or 0
-        RoomMemberState.objects.update_or_create(
-            actor=key,
-            **state_scope(room),
-            defaults={"last_read": last_read, "name": author_name(request)},
+        through = parsed.validated_data.get("read_through")
+        if target or through:
+            get_object_or_404(messages, pk=target or through)
+        last_read = (
+            target - 1
+            if target
+            else (
+                through
+                if through
+                else messages.order_by("-pk").values_list("pk", flat=True).first() or 0
+            )
         )
-        return Response({"last_read": last_read})
+        with transaction.atomic():
+            state, _ = RoomMemberState.objects.select_for_update().get_or_create(
+                actor=key, **state_scope(room), defaults={"name": author_name(request)}
+            )
+            state.last_read = last_read if target else max(state.last_read, last_read)
+            state.name = author_name(request)
+            state.save(update_fields=["last_read", "name", "last_active"])
+        return Response({"last_read": state.last_read})
 
 
 class RoomPresence(CommunityView):

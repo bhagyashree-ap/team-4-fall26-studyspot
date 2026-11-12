@@ -8,6 +8,11 @@ services:
       API_PROXY_TARGET: http://backend:8000
     ports:
       - "127.0.0.1:7500:5173"
+    # The home page and the detail pages read data/spots.json on the server, and
+    # the build context above is the frontend alone. `lib/server/snapshot.ts`
+    # walks up from /app, so mounting the repository's copy at /data is enough.
+    volumes:
+      - ./data:/data:ro
     depends_on:
       backend:
         condition: service_healthy

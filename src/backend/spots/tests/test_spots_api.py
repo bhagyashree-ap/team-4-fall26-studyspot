@@ -525,3 +525,287 @@ class TestIndoorSeatingFilter:
         # an unusable value with Unprocessable Entity, which every other filter
         # test here relies on too.
         assert client.get("/spots", {"indoor_seating": "sometimes"}).status_code == 422
+
+
+#: Bobst Library's own coordinates, so the nearest spot is at distance zero.
+BOBST = {"near_lat": "40.7295", "near_lng": "-73.9973"}
+
+
+class TestNearMe:
+    """``GET /spots?near_lat=&near_lng=`` -- nearest first, with a distance.
+
+    The expected metres come from an independent haversine on a 6,371 km
+    sphere, worked out once outside the API, rather than from the expression
+    under test.
+    """
+
+    def test_orders_nearest_first(self, client: Any, spots: list[StudySpot]) -> None:
+        body = client.get("/spots", BOBST).json()
+
+        assert [item["id"] for item in body["items"]] == [
+            "facdb:bobst",
+            "dohmh:grumpy",
+            "dohmh:hundred",
+            "facdb:butler",
+            "facdb:allerton",
+        ]
+
+    def test_each_item_carries_its_distance_in_whole_metres(
+        self, client: Any, spots: list[StudySpot]
+    ) -> None:
+        items = client.get("/spots", BOBST).json()["items"]
+        distances = {item["id"]: item["distance_metres"] for item in items}
+
+        assert distances["facdb:bobst"] == 0
+        # Bobst to Butler is 9,004 m by the reference calculation. A metre of
+        # slack, because the database and Python may round the last digit
+        # differently.
+        assert abs(distances["facdb:butler"] - 9004) <= 1
+        assert all(isinstance(distance, int) for distance in distances.values())
+
+    def test_items_are_the_contract_plus_the_distance(
+        self, client: Any, spots: list[StudySpot]
+    ) -> None:
+        item = client.get("/spots", BOBST).json()["items"][0]
+
+        assert set(item) == CONTRACT_FIELDS | {"distance_metres"}
+
+    def test_without_a_point_the_items_have_no_distance(
+        self, client: Any, spots: list[StudySpot]
+    ) -> None:
+        # The field exists only when it means something, so callers that never
+        # ask for it see the contract unchanged.
+        items = client.get("/spots").json()["items"]
+
+        assert all("distance_metres" not in item for item in items)
+
+    def test_combines_with_the_filters(self, client: Any, spots: list[StudySpot]) -> None:
+        body = client.get("/spots", {**BOBST, "no_purchase_needed": "true"}).json()
+
+        assert [item["id"] for item in body["items"]] == [
+            "facdb:bobst",
+            "facdb:butler",
+            "facdb:allerton",
+        ]
+        assert body["pagination"]["total"] == 3
+
+    def test_paging_follows_the_distance_order(self, client: Any, spots: list[StudySpot]) -> None:
+        everything = [item["id"] for item in client.get("/spots", BOBST).json()["items"]]
+
+        paged: list[str] = []
+        for offset in range(0, len(RECORDS), 2):
+            page = client.get("/spots", {**BOBST, "limit": 2, "offset": offset}).json()
+            paged.extend(item["id"] for item in page["items"])
+
+        assert paged == everything
+
+    def test_zero_is_a_coordinate_rather_than_its_absence(self, client: Any, db: None) -> None:
+        # Null Island, where both coordinates are 0. Read as "not supplied", 0
+        # would fall back to alphabetical order, where "A Place..." comes first.
+        StudySpot.objects.create(
+            id="test:null-island",
+            name="Zero Zero",
+            category="cafe",
+            borough="Manhattan",
+            latitude=0.0,
+            longitude=0.0,
+        )
+        StudySpot.objects.create(
+            id="test:elsewhere",
+            name="A Place Elsewhere",
+            category="cafe",
+            borough="Manhattan",
+            latitude=40.75,
+            longitude=-73.99,
+        )
+
+        items = client.get("/spots", {"near_lat": "0", "near_lng": "0"}).json()["items"]
+
+        assert [item["id"] for item in items] == ["test:null-island", "test:elsewhere"]
+        assert items[0]["distance_metres"] == 0
+
+    def test_the_antipode_does_not_fail(self, client: Any, spots: list[StudySpot]) -> None:
+        # The far side of the world from Bobst, where rounding can push the
+        # haversine term just past 1 and asin() would raise.
+        response = client.get("/spots", {"near_lat": "-40.7295", "near_lng": "106.0027"})
+
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert items[-1]["id"] == "facdb:bobst"
+        assert abs(items[-1]["distance_metres"] - 20_015_087) <= 1
+
+    @pytest.mark.parametrize(
+        ("query", "field"),
+        [
+            # 0 alone has to count as supplied, or half a point would pass.
+            ({"near_lat": "0"}, "query.near_lng"),
+            ({"near_lng": "0"}, "query.near_lat"),
+            ({"near_lat": "40.7295"}, "query.near_lng"),
+        ],
+    )
+    def test_half_a_point_is_rejected(
+        self, client: Any, spots: list[StudySpot], query: dict[str, str], field: str
+    ) -> None:
+        response = client.get("/spots", query)
+
+        assert response.status_code == 422
+        details = response.json()["error"]["details"]
+        assert [detail["field"] for detail in details] == [field]
+
+    @pytest.mark.parametrize(
+        "query",
+        [
+            {"near_lat": "90.1", "near_lng": "0"},
+            {"near_lat": "-90.1", "near_lng": "0"},
+            {"near_lat": "0", "near_lng": "180.1"},
+            {"near_lat": "0", "near_lng": "-180.1"},
+            {"near_lat": "nan", "near_lng": "0"},
+            {"near_lat": "0", "near_lng": "inf"},
+            {"near_lat": "north", "near_lng": "0"},
+            {"near_lat": "", "near_lng": "0"},
+        ],
+    )
+    def test_a_point_off_the_globe_is_rejected(
+        self, client: Any, spots: list[StudySpot], query: dict[str, str]
+    ) -> None:
+        response = client.get("/spots", query)
+
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "validation_error"
+
+    @pytest.mark.parametrize(
+        "query", [{"near_lat": "90", "near_lng": "180"}, {"near_lat": "-90", "near_lng": "-180"}]
+    )
+    def test_the_edges_of_the_globe_are_accepted(
+        self, client: Any, spots: list[StudySpot], query: dict[str, str]
+    ) -> None:
+        assert client.get("/spots", query).status_code == 200
+
+
+class TestNearNeighborhood:
+    """``GET /spots?near_neighborhood=`` -- nearest first from a neighborhood's centre.
+
+    The centre is the mean position of the neighborhood's spots, and it only
+    sets the order: nothing outside the neighborhood is dropped.
+    """
+
+    def ids(self, client: Any, query: dict[str, str]) -> list[str]:
+        return [item["id"] for item in client.get("/spots", query).json()["items"]]
+
+    def test_the_centre_is_the_mean_of_the_neighborhood_s_spots(
+        self, client: Any, db: None
+    ) -> None:
+        # Two spots in the neighborhood, and a third outside it placed exactly
+        # at their midpoint. Only a centre computed as the mean puts that third
+        # spot at distance zero.
+        StudySpot.objects.bulk_create(
+            [
+                StudySpot(
+                    id="test:west",
+                    name="West",
+                    category="cafe",
+                    neighborhood="Test Hood",
+                    borough="Manhattan",
+                    latitude=40.70,
+                    longitude=-74.00,
+                ),
+                StudySpot(
+                    id="test:east",
+                    name="East",
+                    category="cafe",
+                    neighborhood="Test Hood",
+                    borough="Manhattan",
+                    latitude=40.72,
+                    longitude=-73.98,
+                ),
+                StudySpot(
+                    id="test:middle",
+                    name="Middle",
+                    category="cafe",
+                    neighborhood="Elsewhere",
+                    borough="Manhattan",
+                    latitude=40.71,
+                    longitude=-73.99,
+                ),
+            ]
+        )
+
+        items = client.get("/spots", {"near_neighborhood": "Test Hood"}).json()["items"]
+
+        assert items[0]["id"] == "test:middle"
+        assert items[0]["distance_metres"] == 0
+
+    def test_spots_in_other_neighborhoods_are_kept_and_ranked_after(
+        self, client: Any, spots: list[StudySpot]
+    ) -> None:
+        # Greenwich Village holds Bobst alone, so its centre is Bobst and the
+        # order matches ordering from Bobst's own coordinates.
+        body = client.get("/spots", {"near_neighborhood": "Greenwich Village"}).json()
+
+        assert body["pagination"]["total"] == len(RECORDS)
+        assert [item["id"] for item in body["items"]] == self.ids(client, BOBST)
+        assert body["items"][0]["neighborhood"] == "Greenwich Village"
+        assert {item["neighborhood"] for item in body["items"][1:]} >= {
+            "Chelsea-Hudson Yards",
+            "Greenpoint",
+            "Morningside Heights",
+        }
+
+    def test_items_carry_the_distance(self, client: Any, spots: list[StudySpot]) -> None:
+        item = client.get("/spots", {"near_neighborhood": "Greenwich Village"}).json()["items"][0]
+
+        assert set(item) == CONTRACT_FIELDS | {"distance_metres"}
+        assert item["distance_metres"] == 0
+
+    @pytest.mark.parametrize(
+        "name", ["greenwich village", "GREENWICH VILLAGE", "  Greenwich Village  "]
+    )
+    def test_the_name_is_matched_like_the_neighborhood_filter(
+        self, client: Any, spots: list[StudySpot], name: str
+    ) -> None:
+        assert self.ids(client, {"near_neighborhood": name}) == self.ids(client, BOBST)
+
+    def test_the_centre_ignores_the_filters(self, client: Any, spots: list[StudySpot]) -> None:
+        # Filtering out Bobst, the only spot in Greenwich Village, still orders
+        # from Greenwich Village: the centre is a place, not a result.
+        query = {"near_neighborhood": "Greenwich Village", "no_purchase_needed": "false"}
+
+        assert self.ids(client, query) == ["dohmh:grumpy", "dohmh:hundred"]
+
+    @pytest.mark.parametrize("name", ["Atlantis", "Greenwich"])
+    def test_a_neighborhood_with_no_spots_is_rejected(
+        self, client: Any, spots: list[StudySpot], name: str
+    ) -> None:
+        # "Greenwich" is a substring of a real name, and still not a match: the
+        # rule is exact, as it is for the neighborhood filter.
+        response = client.get("/spots", {"near_neighborhood": name})
+
+        assert response.status_code == 422
+        assert response.json()["error"]["details"] == [
+            {
+                "field": "query.near_neighborhood",
+                "message": f"No study spots are in a neighborhood named {name!r}.",
+                "type": "invalid",
+            }
+        ]
+
+    @pytest.mark.parametrize(
+        "point",
+        [{"near_lat": "40.7"}, {"near_lng": "-73.9"}, {"near_lat": "0", "near_lng": "0"}],
+    )
+    def test_it_cannot_be_combined_with_a_point(
+        self, client: Any, spots: list[StudySpot], point: dict[str, str]
+    ) -> None:
+        response = client.get("/spots", {"near_neighborhood": "Greenwich Village", **point})
+
+        assert response.status_code == 422
+        assert response.json()["error"]["details"] == [
+            {
+                "field": "query.near_neighborhood",
+                "message": "Supply either near_neighborhood or near_lat and near_lng, not both.",
+                "type": "invalid",
+            }
+        ]
+
+    def test_a_blank_name_is_rejected(self, client: Any, spots: list[StudySpot]) -> None:
+        assert client.get("/spots?near_neighborhood=").status_code == 422

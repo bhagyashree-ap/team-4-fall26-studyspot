@@ -5,6 +5,7 @@ from datetime import datetime
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import check_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Count, Q
@@ -16,6 +17,7 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.exceptions import NotAuthenticated, NotFound, PermissionDenied
 from rest_framework.request import Request
 from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
 from accounts.authentication import Auth0Authentication
@@ -109,7 +111,11 @@ def viewer(request: Request, community: Community):
 
 def principal(request: Request, community: Community):
     user = viewer(request, community)
-    return user if isinstance(user, GuestOwner) else actor(request)
+    return user if isinstance(user, (GuestMember, GuestOwner)) else actor(request)
+
+
+def channel_context(request: Request, community: Community) -> dict:
+    return {"request": request, "role": role_for(community, viewer(request, community))}
 
 
 def community_for(community_id: int) -> Community:
@@ -250,6 +256,7 @@ class CommunityDetail(CommunityView):
                 "channels": ChannelSerializer(
                     visible_channels(community, role_for(community, viewer(request, community))),
                     many=True,
+                    context=channel_context(request, community),
                 ).data,
             }
         )
@@ -387,6 +394,7 @@ class Channels(CommunityView):
             ChannelSerializer(
                 visible_channels(community, role_for(community, viewer(request, community))),
                 many=True,
+                context=channel_context(request, community),
             ).data
         )
 
@@ -395,9 +403,58 @@ class Channels(CommunityView):
         parsed.is_valid(raise_exception=True)
         community = community_for(community_id)
         channel = services.create_channel(
-            community, principal(request, community), parsed.validated_data["name"]
+            community,
+            principal(request, community),
+            parsed.validated_data["name"],
+            parsed.validated_data.get("password", ""),
         )
-        return Response(ChannelSerializer(channel).data, status=201)
+        if channel.password_hash:
+            request.session["unlocked_channels"] = [
+                *request.session.get("unlocked_channels", []),
+                str(channel.pk),
+            ]
+        return Response(
+            ChannelSerializer(channel, context=channel_context(request, community)).data,
+            status=201,
+        )
+
+
+class ChannelUnlockThrottle(SimpleRateThrottle):
+    scope = "channel_unlock"
+    THROTTLE_RATES = {"channel_unlock": "10/min"}
+
+    def get_cache_key(self, request, view):
+        return self.cache_format % {"scope": self.scope, "ident": self.get_ident(request)}
+
+
+class ChannelUnlock(CommunityView):
+    throttle_classes = [ChannelUnlockThrottle]
+
+    def post(self, request: Request, community_id: int, channel_id: int) -> Response:
+        class Passphrase(serializers.Serializer):
+            password = serializers.CharField(max_length=72, trim_whitespace=False)
+
+        parsed = Passphrase(data=request.data)
+        parsed.is_valid(raise_exception=True)
+        community = community_for(community_id)
+        channel = get_object_or_404(Channel, pk=channel_id, community=community)
+        role = role_for(community, viewer(request, community))
+        if role == "visitor":
+            raise PermissionDenied("Join this community to open its channels.")
+        if channel.private and role not in {"owner", "moderator"}:
+            raise NotFound("Channel not found.")
+        if (
+            channel.password_hash
+            and role not in {"owner", "moderator"}
+            and not check_password(parsed.validated_data["password"], channel.password_hash)
+        ):
+            raise PermissionDenied("That passphrase didn’t unlock this channel.")
+        unlocked = set(request.session.get("unlocked_channels", []))
+        unlocked.add(str(channel.pk))
+        request.session["unlocked_channels"] = sorted(unlocked)
+        return Response(
+            ChannelSerializer(channel, context=channel_context(request, community)).data
+        )
 
 
 class ChannelDetail(CommunityView):
@@ -453,7 +510,9 @@ class ChannelDetail(CommunityView):
                 setattr(channel, field, value)
             if parsed.validated_data:
                 channel.save(update_fields=list(parsed.validated_data))
-        return Response(ChannelSerializer(channel).data)
+        return Response(
+            ChannelSerializer(channel, context=channel_context(request, community)).data
+        )
 
 
 class Invites(CommunityView):

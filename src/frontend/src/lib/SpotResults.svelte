@@ -4,12 +4,19 @@
 	import ResultsMap from './ResultsMap.svelte';
 	import { showsCampus } from './campus';
 	import { mapsUrl } from './maps';
-	import { place, readableCategory } from './spot';
+	import { formatDistance, place, readableCategory } from './spot';
 	import { orderByTrunk, routeColour, routeTextColour, walkMinutes } from './subway';
-	import type { StudySpot } from './contract';
+	import type { NearbySpot, StudySpot } from './contract';
 
 	type Props = {
-		spots: StudySpot[];
+		spots: (StudySpot | NearbySpot)[];
+		/**
+		 * Who the distances are measured from, as in "450 m from you", while the
+		 * results are ordered by distance. A card shows a distance only with
+		 * this set, so one left over from an earlier ordering is never shown
+		 * against a later one.
+		 */
+		distanceFrom?: string;
 		total: number;
 		hasMore: boolean;
 		loadingMore?: boolean;
@@ -29,6 +36,7 @@
 		loadingMore = false,
 		onShowMore,
 		view = 'list',
+		distanceFrom,
 		onView
 	}: Props = $props();
 
@@ -152,6 +160,13 @@
 						<span class="category">{readableCategory(spot.category)}</span>
 						<span aria-hidden="true">·</span>
 						<span>{place(spot)}</span>
+						{#if distanceFrom !== undefined && 'distance_metres' in spot}
+							<!-- Straight-line, like the subway distance: see the contract. -->
+							<span aria-hidden="true">·</span>
+							<span class="distance"
+								>{formatDistance(spot.distance_metres)} from {distanceFrom}</span
+							>
+						{/if}
 					</p>
 					{#if spot.address}
 						<p class="address">{spot.address}</p>
@@ -443,6 +458,11 @@
 		margin: 0;
 		color: var(--color-muted);
 		font-size: 13px;
+	}
+
+	.distance {
+		color: var(--color-text);
+		font-weight: 650;
 	}
 
 	.category {

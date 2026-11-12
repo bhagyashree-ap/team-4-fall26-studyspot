@@ -14,6 +14,42 @@
 </div>
 
 <style>
+	.body > :global(div + div) {
+		margin-top: 8px;
+	}
+	.body :global(ul) {
+		list-style: disc;
+		padding-left: 1.3em;
+		margin-block: 8px;
+	}
+	.body :global(ol) {
+		list-style: decimal;
+		padding-left: 1.3em;
+		margin-block: 8px;
+	}
+	.body :global(blockquote) {
+		border-left: 2px solid currentColor;
+		padding-left: 12px;
+		margin-block: 8px;
+		opacity: 0.85;
+	}
+	.body :global(h1),
+	.body :global(h2),
+	.body :global(h3) {
+		font-size: 1.05em;
+		font-weight: 600;
+		margin-block: 8px;
+	}
+	.body :global(strong) {
+		font-weight: 650;
+	}
+	.body :global(em) {
+		font-style: italic;
+	}
+	.body :global(code) {
+		font-size: 0.88em;
+	}
+
 	.body {
 		overflow-wrap: anywhere;
 	}

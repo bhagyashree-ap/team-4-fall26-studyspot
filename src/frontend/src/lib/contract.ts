@@ -216,6 +216,29 @@ export type SpotPage = {
 	pagination: Pagination;
 };
 
+/**
+ * Where `GET /spots` orders results from, nearest first.
+ *
+ * Two variants rather than three optional fields, because the API rejects a
+ * request carrying both a point and a neighborhood. A neighborhood is resolved
+ * by the server to the mean position of its spots, matched case-insensitively
+ * and exactly like the `neighborhood` filter. Either way only the order
+ * changes: spots outside the neighborhood are still returned.
+ */
+export type Near =
+	{ kind: 'point'; latitude: number; longitude: number } | { kind: 'neighborhood'; name: string };
+
+/** A spot as `GET /spots` serves it when ordered by distance. */
+export type NearbySpot = StudySpot & {
+	/** Straight-line metres from the requested point, rounded to the metre. */
+	distance_metres: number;
+};
+
+export type NearbySpotPage = {
+	items: NearbySpot[];
+	pagination: Pagination;
+};
+
 /** One specific problem with a request. */
 export type ErrorDetail = {
 	field: string | null;

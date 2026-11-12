@@ -1,9 +1,12 @@
 from django.urls import path
 
-from . import dm_views, message_views, notifications, room_views, views
+from . import demo_views, dm_views, message_views, notifications, presence, room_views, views
 
 urlpatterns = [
+    path("chat/demo", demo_views.MessageDemo.as_view()),
     path("chat/people", dm_views.PeopleSearch.as_view()),
+    path("chat/presence", presence.Heartbeat.as_view()),
+    path("communities/<int:community_id>/presence", presence.CommunityMembers.as_view()),
     path("communities/access", views.CommunityAccess.as_view()),
     path("dms/<int:conversation_id>/messages/search", dm_views.DirectSearch.as_view()),
     path("dms/<int:conversation_id>/messages/<int:message_id>/pin", dm_views.DirectPin.as_view()),
@@ -34,6 +37,7 @@ urlpatterns = [
         room_views.AlertPreference.as_view(),
     ),
     path("dms/<int:conversation_id>/messages/snapshot", room_views.MessageSnapshot.as_view()),
+    path("dms/<int:conversation_id>/preferences", dm_views.DirectConversationPreference.as_view()),
     path(
         "communities/<int:community_id>/channels/<int:channel_id>/messages/snapshot",
         room_views.MessageSnapshot.as_view(),
@@ -53,6 +57,10 @@ urlpatterns = [
     path("communities/<int:community_id>/members/<str:user_id>", views.MemberDetail.as_view()),
     path("communities/<int:community_id>/transfer", views.Transfer.as_view()),
     path("communities/<int:community_id>/channels", views.Channels.as_view()),
+    path(
+        "communities/<int:community_id>/channels/<int:channel_id>/unlock",
+        views.ChannelUnlock.as_view(),
+    ),
     path("communities/<int:community_id>/channels/<int:channel_id>", views.ChannelDetail.as_view()),
     path("communities/<int:community_id>/messages/search", message_views.MessageSearch.as_view()),
     path(

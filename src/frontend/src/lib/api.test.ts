@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError, fetchFacets, listSpots, searchSpots } from './api';
+import { ApiError, fetchFacets, listSpots, listSpotsNear, searchSpots } from './api';
 import type { SpotPage } from './contract';
 
 /** A page shaped like the API's, with as many identical items as asked for. */
@@ -249,6 +249,95 @@ describe('filters', () => {
 		await listSpots({ filters: { free_public_wifi: false }, fetcher });
 
 		expect(urls[0]).toContain('free_public_wifi=false');
+	});
+});
+
+describe('listSpotsNear', () => {
+	it('sends a point as near_lat and near_lng on the listing endpoint', async () => {
+		const { urls, fetcher } = recorder(() => json(page(3)));
+
+		await listSpotsNear({ kind: 'point', latitude: 40.7295, longitude: -73.9965 }, { fetcher });
+
+		const url = new URL(urls[0], 'http://localhost');
+		expect(url.pathname).toBe('/api/spots');
+		expect(url.searchParams.get('near_lat')).toBe('40.7295');
+		expect(url.searchParams.get('near_lng')).toBe('-73.9965');
+		expect(url.searchParams.has('near_neighborhood')).toBe(false);
+		expect(url.searchParams.get('limit')).toBe('20');
+		expect(url.searchParams.get('offset')).toBe('0');
+	});
+
+	it('sends zero coordinates rather than dropping them', async () => {
+		// 0 is a real latitude and longitude, and the API rejects one without
+		// the other.
+		const { urls, fetcher } = recorder(() => json(page(1)));
+
+		await listSpotsNear({ kind: 'point', latitude: 0, longitude: 0 }, { fetcher });
+
+		const url = new URL(urls[0], 'http://localhost');
+		expect(url.searchParams.get('near_lat')).toBe('0');
+		expect(url.searchParams.get('near_lng')).toBe('0');
+	});
+
+	it('sends a neighborhood as near_neighborhood only', async () => {
+		// The API rejects a neighborhood combined with a point.
+		const { urls, fetcher } = recorder(() => json(page(3)));
+
+		await listSpotsNear({ kind: 'neighborhood', name: 'Greenwich Village' }, { fetcher });
+
+		const url = new URL(urls[0], 'http://localhost');
+		expect(url.searchParams.get('near_neighborhood')).toBe('Greenwich Village');
+		expect(url.searchParams.has('near_lat')).toBe(false);
+		expect(url.searchParams.has('near_lng')).toBe(false);
+	});
+
+	it('keeps the filters and the paging alongside the point', async () => {
+		const { urls, fetcher } = recorder(() => json(page(40, 20, 20)));
+
+		await listSpotsNear(
+			{ kind: 'neighborhood', name: 'Greenpoint' },
+			{ filters: { borough: 'Brooklyn', free_public_wifi: false }, offset: 20, fetcher }
+		);
+
+		const url = new URL(urls[0], 'http://localhost');
+		expect(url.searchParams.get('borough')).toBe('Brooklyn');
+		expect(url.searchParams.get('free_public_wifi')).toBe('false');
+		expect(url.searchParams.get('offset')).toBe('20');
+		expect(url.searchParams.has('q')).toBe(false);
+	});
+
+	it('returns each spot with its distance', async () => {
+		const body = page(1);
+		const { fetcher } = recorder(() =>
+			json({ ...body, items: body.items.map((spot) => ({ ...spot, distance_metres: 412 })) })
+		);
+
+		const result = await listSpotsNear(
+			{ kind: 'point', latitude: 40.73, longitude: -73.95 },
+			{ fetcher }
+		);
+
+		expect(result.items[0].distance_metres).toBe(412);
+	});
+
+	it('reports an unknown neighborhood with the API code and message', async () => {
+		const { fetcher } = recorder(() =>
+			json(
+				{
+					error: {
+						code: 'validation_error',
+						message: "No study spots are in a neighborhood named 'Atlantis'.",
+						details: []
+					}
+				},
+				422
+			)
+		);
+
+		const failure = listSpotsNear({ kind: 'neighborhood', name: 'Atlantis' }, { fetcher });
+
+		await expect(failure).rejects.toBeInstanceOf(ApiError);
+		await expect(failure).rejects.toMatchObject({ code: 'validation_error', status: 422 });
 	});
 });
 

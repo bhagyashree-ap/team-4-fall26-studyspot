@@ -7,6 +7,7 @@ from typing import cast
 
 from django.contrib.postgres.search import SearchQuery, SearchVector
 from django.db import IntegrityError, transaction
+from django.db.models import Q
 from django.db.models.functions import TruncDate
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -120,6 +121,12 @@ def member_role(request: Request, channel: Channel) -> str:
         raise NotFound("Channel not found.")
     if role == "visitor":
         raise PermissionDenied("Join this community to read or send messages.")
+    if (
+        channel.password_hash
+        and role not in {"owner", "moderator"}
+        and str(channel.pk) not in request.session.get("unlocked_channels", [])
+    ):
+        raise PermissionDenied("Unlock this channel to read or send messages.")
     return role
 
 
@@ -393,6 +400,11 @@ class MessageSearch(CommunityView):
         if role == "visitor":
             raise PermissionDenied("Join this community to search messages.")
         messages = Message.objects.filter(channel__in=visible_channels(community, role))
+        if role not in {"owner", "moderator"}:
+            messages = messages.filter(
+                Q(channel__password_hash="")
+                | Q(channel_id__in=request.session.get("unlocked_channels", []))
+            )
         found = search_messages(messages, request.query_params).prefetch_related("reactions")
         return Response({"items": [message_data(request, item, role) for item in found]})
 

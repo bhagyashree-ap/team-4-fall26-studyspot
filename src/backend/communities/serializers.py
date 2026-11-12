@@ -32,6 +32,20 @@ class CommunitySerializer(serializers.ModelSerializer):
 
 
 class ChannelSerializer(serializers.ModelSerializer):
+    password_protected = serializers.SerializerMethodField()
+    locked = serializers.SerializerMethodField()
+
+    def get_password_protected(self, channel: Channel) -> bool:
+        return bool(channel.password_hash)
+
+    def get_locked(self, channel: Channel) -> bool:
+        role = self.context.get("role", "visitor")
+        if role in {"owner", "moderator"} or not channel.password_hash:
+            return False
+        request = self.context.get("request")
+        unlocked = request.session.get("unlocked_channels", []) if request else []
+        return str(channel.pk) not in unlocked
+
     class Meta:
         model = Channel
         fields = [
@@ -41,6 +55,8 @@ class ChannelSerializer(serializers.ModelSerializer):
             "archived",
             "topic",
             "private",
+            "password_protected",
+            "locked",
             "read_only",
             "slowmode_seconds",
         ]
@@ -48,6 +64,9 @@ class ChannelSerializer(serializers.ModelSerializer):
 
 class ChannelWriteSerializer(serializers.Serializer):
     name = serializers.RegexField(r"^[a-z0-9][a-z0-9-]{0,49}$")
+    password = serializers.CharField(
+        min_length=4, max_length=72, required=False, allow_blank=True, trim_whitespace=False
+    )
 
 
 class MemberSerializer(serializers.ModelSerializer):

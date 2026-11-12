@@ -2,18 +2,30 @@
 	// Aliased because `page` is a local name for a page of results throughout
 	// this file, which is a different thing entirely.
 	import { page as route } from '$app/state';
+	import NearControl from '$lib/NearControl.svelte';
 	import SearchBar from '$lib/SearchBar.svelte';
 	import SiteHeader from '$lib/SiteHeader.svelte';
 	import SpotResults from '$lib/SpotResults.svelte';
 	import SpotFiltersBar from '$lib/SpotFilters.svelte';
-	import { ApiError, DEFAULT_LIMIT, fetchFacets, listSpots, searchSpots } from '$lib/api';
-	import type { Facets, SpotFilters, StudySpot } from '$lib/contract';
+	import {
+		ApiError,
+		DEFAULT_LIMIT,
+		fetchFacets,
+		listSpots,
+		listSpotsNear,
+		searchSpots
+	} from '$lib/api';
+	import type { Facets, Near, NearbySpot, SpotFilters, StudySpot } from '$lib/contract';
+	import { locate } from '$lib/near';
+	import type { PageProps } from './$types';
+
+	let { data }: PageProps = $props();
 
 	type Status = 'idle' | 'searching' | 'loaded' | 'error';
 
 	let status = $state<Status>('idle');
 	let query = $state('');
-	let spots = $state<StudySpot[]>([]);
+	let spots = $state<(StudySpot | NearbySpot)[]>([]);
 	let total = $state(0);
 	let hasMore = $state(false);
 	let loadingMore = $state(false);
@@ -21,6 +33,25 @@
 
 	let facets = $state<Facets | null>(null);
 	let filters = $state<SpotFilters>({});
+
+	/**
+	 * Where results are ordered from, nearest first, or null for the usual order.
+	 *
+	 * Kept apart from `filters` because it narrows nothing: Clear filters leaves
+	 * it alone, and only "Stop sorting by distance" or a search ends it. It and
+	 * the search box exclude each other, because the ranked search orders by
+	 * relevance and takes no point -- so setting one empties the other.
+	 */
+	let near = $state<Near | null>(null);
+	let locating = $state(false);
+	let nearNotice = $state('');
+
+	/**
+	 * Tags each Near me click, like `latestSearch` does requests, so a position
+	 * that arrives after the reader has moved on -- typed a search, picked a
+	 * neighborhood -- is dropped rather than snatching the results back.
+	 */
+	let latestLocate = 0;
 
 	/**
 	 * List or map.
@@ -44,7 +75,16 @@
 	 * recently issued request is allowed to write results, so it is also the one
 	 * that wrote this.
 	 */
-	let applied = $state<{ query: string; filters: SpotFilters }>({ query: '', filters: {} });
+	let applied = $state<{ query: string; filters: SpotFilters; near: Near | null }>({
+		query: '',
+		filters: {},
+		near: null
+	});
+
+	/** Who the distances on the cards are measured from, for their wording. */
+	let distanceFrom = $derived(
+		applied.near === null ? undefined : applied.near.kind === 'point' ? 'you' : applied.near.name
+	);
 
 	// The hero fills the viewport until there is something below it to see.
 	let searched = $derived(status !== 'idle');
@@ -133,18 +173,18 @@
 	/**
 	 * Run whichever request the current query and filters call for.
 	 *
-	 * A query ranks; filters alone list. With neither there is nothing to show,
-	 * so the page returns to the state it loaded in rather than fetching
-	 * everything.
+	 * A query ranks; a point orders by distance; filters alone list. With none
+	 * of them there is nothing to show, so the page returns to the state it
+	 * loaded in rather than fetching everything.
 	 */
 	async function run(everything = false): Promise<void> {
 		const search = ++latestSearch;
 		const trimmed = query.trim();
 		const filtering = Object.keys(filters).length > 0;
 
-		applied = { query: trimmed, filters: { ...filters } };
+		applied = { query: trimmed, filters: { ...filters }, near };
 
-		if (!trimmed && !filtering && !everything) {
+		if (!trimmed && !filtering && near === null && !everything) {
 			status = 'idle';
 			spots = [];
 			total = 0;
@@ -158,7 +198,9 @@
 		try {
 			const page = trimmed
 				? await searchSpots(trimmed, { limit: DEFAULT_LIMIT, filters })
-				: await listSpots({ limit: DEFAULT_LIMIT, filters });
+				: near
+					? await listSpotsNear(near, { limit: DEFAULT_LIMIT, filters })
+					: await listSpots({ limit: DEFAULT_LIMIT, filters });
 			if (search !== latestSearch) return;
 
 			spots = page.items;
@@ -184,11 +226,70 @@
 	 */
 	function handleQueryInput(next: string): void {
 		query = next;
+		if (next.trim()) leaveNear();
 		runSoon();
 	}
 
 	function handleSearch(submitted: string): void {
 		query = submitted;
+		if (submitted.trim()) leaveNear();
+		runNow();
+	}
+
+	/**
+	 * Stop ordering by distance, and abandon a Near me still waiting for a
+	 * position. Leaves the request to the caller, which knows what comes next.
+	 */
+	function leaveNear(): void {
+		latestLocate++;
+		locating = false;
+		nearNotice = '';
+		near = null;
+	}
+
+	/** Order by distance from `next`, which ends any search in the box. */
+	function useNear(next: Near): void {
+		query = '';
+		near = next;
+		nearNotice = '';
+		runNow();
+	}
+
+	async function handleLocate(): Promise<void> {
+		const request = ++latestLocate;
+		locating = true;
+		nearNotice = '';
+
+		const outcome = await locate(navigator.geolocation);
+		if (request !== latestLocate) return;
+		locating = false;
+
+		switch (outcome.kind) {
+			case 'found':
+				useNear({ kind: 'point', latitude: outcome.latitude, longitude: outcome.longitude });
+				break;
+			case 'denied':
+				nearNotice =
+					"Location access is blocked for this site. Allow it in your browser's site settings, or choose a neighborhood instead.";
+				break;
+			case 'unsupported':
+				nearNotice = "This browser can't share your location. Choose a neighborhood instead.";
+				break;
+			case 'unavailable':
+				nearNotice = "Couldn't find your location. Try again, or choose a neighborhood instead.";
+				break;
+			default:
+				outcome satisfies never;
+		}
+	}
+
+	function handleNeighborhood(name: string): void {
+		leaveNear();
+		useNear({ kind: 'neighborhood', name });
+	}
+
+	function handleClearNear(): void {
+		leaveNear();
 		runNow();
 	}
 
@@ -242,17 +343,12 @@
 		try {
 			// Deliberately `applied` and not the live controls: this continues the
 			// page already on screen, which the box may since have been typed in.
+			const options = { limit: DEFAULT_LIMIT, offset: spots.length, filters: applied.filters };
 			const page = applied.query
-				? await searchSpots(applied.query, {
-						limit: DEFAULT_LIMIT,
-						offset: spots.length,
-						filters: applied.filters
-					})
-				: await listSpots({
-						limit: DEFAULT_LIMIT,
-						offset: spots.length,
-						filters: applied.filters
-					});
+				? await searchSpots(applied.query, options)
+				: applied.near
+					? await listSpotsNear(applied.near, options)
+					: await listSpots(options);
 			if (search !== latestSearch) return;
 
 			spots = [...spots, ...page.items];
@@ -292,6 +388,16 @@
 
 			<div class="search-card">
 				<SearchBar value={query} onInput={handleQueryInput} onSearch={handleSearch} />
+				<div class="search-divider" aria-hidden="true"></div>
+				<NearControl
+					neighborhoods={data.neighborhoods}
+					{near}
+					{locating}
+					notice={nearNotice}
+					onLocate={() => void handleLocate()}
+					onNeighborhood={handleNeighborhood}
+					onClear={handleClearNear}
+				/>
 				<div class="search-divider" aria-hidden="true"></div>
 				<SpotFiltersBar {facets} {filters} onChange={handleFilters} />
 			</div>
@@ -338,6 +444,7 @@
 					{hasMore}
 					{loadingMore}
 					{view}
+					{distanceFrom}
 					onView={(next) => (view = next)}
 					onShowMore={handleShowMore}
 				/>

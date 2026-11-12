@@ -5,6 +5,7 @@ import secrets
 from datetime import datetime, timedelta
 
 from django.contrib.auth import get_user_model
+from django.contrib.auth.hashers import make_password
 from django.db import models, transaction
 from django.db.models import F
 from django.utils import timezone
@@ -110,15 +111,18 @@ def leave(community: Community, user: object) -> None:
 
 
 @transaction.atomic
-def create_channel(community: Community, user: object, name: str) -> Channel:
+def create_channel(community: Community, user: object, name: str, password: str = "") -> Channel:
     community = Community.objects.select_for_update().get(pk=community.pk)
-    require(community, user, Action.MANAGE)
+    require(community, user, Action.CREATE_CHANNEL)
     if Channel.objects.filter(community=community).count() >= MAX_CHANNELS:
         raise ValidationError("This community has the maximum number of channels.")
     if Channel.objects.filter(community=community, name__iexact=name).exists():
         raise ValidationError("A channel with this name already exists.")
     return Channel.objects.create(
-        community=community, name=name, position=community.channels.count()
+        community=community,
+        name=name,
+        position=community.channels.count(),
+        password_hash=make_password(password) if password else "",
     )
 
 

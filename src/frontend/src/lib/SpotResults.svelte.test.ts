@@ -253,3 +253,33 @@ describe('switching between the list and the map', () => {
 		await expect.element(page.getByText('Showing 1 of 40 places')).toBeInTheDocument();
 	});
 });
+
+describe('the distance on a card', () => {
+	const NEARBY = { ...SPOT, distance_metres: 437 };
+
+	it('says how far the place is, and from where, while ordered by distance', async () => {
+		render(SpotResults, { spots: [NEARBY], total: 1, hasMore: false, distanceFrom: 'you' });
+
+		await expect.element(page.getByText('450 m from you')).toBeInTheDocument();
+	});
+
+	it('names the neighborhood it is measured from', async () => {
+		render(SpotResults, {
+			spots: [NEARBY],
+			total: 1,
+			hasMore: false,
+			distanceFrom: 'Greenwich Village'
+		});
+
+		await expect.element(page.getByText('450 m from Greenwich Village')).toBeInTheDocument();
+	});
+
+	it('shows no distance when the results are not ordered by one', async () => {
+		// A card left over from an earlier ordering still carries its number,
+		// and it is measured from a point no longer in force.
+		render(SpotResults, { spots: [NEARBY], total: 1, hasMore: false });
+
+		await expect.element(page.getByText('Bobst Library')).toBeInTheDocument();
+		await expect.element(page.getByText(/ m from /)).not.toBeInTheDocument();
+	});
+});

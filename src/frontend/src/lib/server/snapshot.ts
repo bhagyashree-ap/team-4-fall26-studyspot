@@ -19,7 +19,8 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
-import type { StudySpot } from '$lib/contract';
+import { BOROUGHS, type StudySpot } from '$lib/contract';
+import type { NeighborhoodGroup } from '$lib/near';
 
 /**
  * Walk up from the working directory until `data/spots.json` appears.
@@ -56,6 +57,30 @@ export function allSpots(): StudySpot[] {
 		cached = JSON.parse(readFileSync(findSnapshot(), 'utf-8')) as StudySpot[];
 	}
 	return cached;
+}
+
+/**
+ * Every neighborhood that has a spot, grouped by borough, for the Near
+ * neighborhood picker.
+ *
+ * Boroughs in the contract's order and names alphabetical within each, so the
+ * list reads the same on every build. Taken from the same snapshot the API is
+ * loaded from, so every name is one `near_neighborhood` accepts. A borough with
+ * no named neighborhood is left out rather than shown as an empty group.
+ */
+export function neighborhoodsByBorough(): NeighborhoodGroup[] {
+	const names = new Map<string, Set<string>>();
+	for (const spot of allSpots()) {
+		if (spot.neighborhood === null) continue;
+		const group = names.get(spot.borough) ?? new Set<string>();
+		group.add(spot.neighborhood);
+		names.set(spot.borough, group);
+	}
+
+	return BOROUGHS.flatMap((borough) => {
+		const group = names.get(borough);
+		return group ? [{ borough, neighborhoods: [...group].sort((a, b) => a.localeCompare(b)) }] : [];
+	});
 }
 
 /** One spot by identifier, or `undefined` when the snapshot has no such row. */

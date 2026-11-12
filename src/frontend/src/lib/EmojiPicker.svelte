@@ -7,8 +7,11 @@
 	import Search from '@lucide/svelte/icons/search';
 	import X from '@lucide/svelte/icons/x';
 	import { tick } from 'svelte';
-	let { onpick, reaction = false }: { onpick: (value: string) => void; reaction?: boolean } =
-		$props();
+	let {
+		onpick,
+		reaction = false,
+		label
+	}: { onpick: (value: string) => void; reaction?: boolean; label?: string } = $props();
 	let panel: HTMLDivElement, trigger: HTMLButtonElement;
 	let input = $state<HTMLInputElement>();
 	let catalog = $state.raw<Record<string, string[][]>>({}),
@@ -50,13 +53,15 @@
 </script>
 
 <button
-	class="chat-icon {chatControls.icon}"
+	class={label ? 'emoji-menu-trigger' : `chat-icon ${chatControls.icon}`}
 	bind:this={trigger}
 	type="button"
-	aria-label={reaction ? 'Add reaction' : 'Choose emoji'}
+	aria-label={label ?? (reaction ? 'Add reaction' : 'Choose emoji')}
 	title={reaction ? 'Add reaction' : 'Choose emoji'}
 	onclick={open}
-	>{#if reaction}<SmilePlus size={19} />{:else}<Smile size={21} />{/if}</button
+	>{#if reaction}<SmilePlus size={19} />{:else}<Smile size={21} />{/if}{#if label}<span
+			>{label}</span
+		>{/if}</button
 >
 <div class="emoji-panel" bind:this={panel} popover="auto" role="dialog" aria-label="Emoji picker">
 	<header>
@@ -98,6 +103,26 @@
 </div>
 
 <style>
+	.emoji-menu-trigger {
+		display: flex;
+		align-items: center;
+		gap: 10px;
+		width: 100%;
+		padding: 10px 12px;
+		min-height: 40px;
+		font: inherit;
+		font-size: 13px;
+		background: transparent;
+		color: inherit;
+		border: 0;
+		border-radius: 8px;
+		text-align: left;
+	}
+	@media (hover: hover) and (pointer: fine) {
+		.emoji-menu-trigger:hover {
+			background: var(--well);
+		}
+	}
 	.emoji-panel {
 		position: fixed;
 		inset: auto;

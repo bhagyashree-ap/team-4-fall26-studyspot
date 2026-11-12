@@ -9,7 +9,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { allSpots, nearbySpots, spotById } from './snapshot';
+import { BOROUGHS } from '$lib/contract';
+import { allSpots, nearbySpots, neighborhoodsByBorough, spotById } from './snapshot';
 
 describe('reading the snapshot', () => {
 	it('finds the committed file', () => {
@@ -114,5 +115,39 @@ describe('what is nearby', () => {
 		const [nearest] = nearbySpots(anchor!, 1, 1000);
 		expect(nearest.metres).toBeGreaterThan(0);
 		expect(nearest.metres).toBeLessThan(200);
+	});
+});
+
+describe('the neighborhood picker', () => {
+	it('lists every neighborhood in the snapshot exactly once', () => {
+		// Each one has to be a name `near_neighborhood` accepts, which is any
+		// neighborhood that has a spot -- so exactly the snapshot's own set.
+		const listed = neighborhoodsByBorough().flatMap((group) => group.neighborhoods);
+		const inSnapshot = new Set(allSpots().flatMap((spot) => spot.neighborhood ?? []));
+
+		expect(listed.length).toBe(new Set(listed).size);
+		expect(new Set(listed)).toEqual(inSnapshot);
+	});
+
+	it('puts each neighborhood under the borough its spots are in', () => {
+		for (const group of neighborhoodsByBorough()) {
+			for (const name of group.neighborhoods) {
+				const spot = allSpots().find((candidate) => candidate.neighborhood === name);
+				expect(spot?.borough).toBe(group.borough);
+			}
+		}
+	});
+
+	it('orders boroughs as the contract does and names alphabetically', () => {
+		const groups = neighborhoodsByBorough();
+
+		expect(groups.map((group) => group.borough)).toEqual(
+			BOROUGHS.filter((borough) => groups.some((group) => group.borough === borough))
+		);
+		for (const group of groups) {
+			expect(group.neighborhoods).toEqual(
+				[...group.neighborhoods].sort((a, b) => a.localeCompare(b))
+			);
+		}
 	});
 });

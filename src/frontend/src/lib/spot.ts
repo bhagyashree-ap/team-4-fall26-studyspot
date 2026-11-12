@@ -25,3 +25,18 @@ export function readableCategory(category: string): string {
 export function place(spot: Pick<StudySpot, 'neighborhood' | 'borough'>): string {
 	return spot.neighborhood ? `${spot.neighborhood}, ${spot.borough}` : spot.borough;
 }
+
+/**
+ * A distance from where the reader asked about, for the Near me ordering.
+ *
+ * Rounded like the detail page's walking distances -- to 10 m under 100 m and
+ * 50 m above -- because a metre of precision would be false confidence in a
+ * straight-line figure. From a kilometre it switches to km, with one decimal
+ * until the decimal stops mattering at 10 km.
+ */
+export function formatDistance(metres: number): string {
+	const rounded = metres < 100 ? Math.round(metres / 10) * 10 : Math.round(metres / 50) * 50;
+	if (rounded < 1000) return `${rounded} m`;
+	const kilometres = metres / 1000;
+	return kilometres < 9.95 ? `${kilometres.toFixed(1)} km` : `${Math.round(kilometres)} km`;
+}

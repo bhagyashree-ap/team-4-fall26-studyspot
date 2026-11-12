@@ -7,8 +7,10 @@ and the search projection all agree on.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
+from django.db.models import Avg
 from rest_framework import serializers
 
 from .models import (
@@ -54,6 +56,50 @@ class StudySpotSerializer(serializers.ModelSerializer):
             "venue_wifi",
             "opening_hours",
         ]
+
+
+class NearbySpotSerializer(StudySpotSerializer):
+    """The summary plus how far the spot is from the point the caller gave.
+
+    A separate serializer rather than a nullable field on the summary, so that
+    a request without a point gets exactly the contract it always has.
+    ``distance_metres`` is straight-line, like ``subway_metres``, and rounded
+    to the metre; it reads the annotation ``SpotListView`` adds.
+    """
+
+    distance_metres = serializers.IntegerField(read_only=True)
+
+    class Meta(StudySpotSerializer.Meta):
+        fields = [*StudySpotSerializer.Meta.fields, "distance_metres"]
+
+
+@dataclass(frozen=True)
+class Coordinates:
+    """A validated point on the globe, in decimal degrees."""
+
+    latitude: float
+    longitude: float
+
+
+def neighborhood_centre(name: str) -> Coordinates | None:
+    """The mean coordinates of every spot in neighborhood ``name``, or None if it has none.
+
+    Matched the way the ``neighborhood`` filter matches: case-insensitive and
+    exact, so "Greenwich" does not stand in for "Greenwich Village".
+
+    A mean of points rather than a geographic centre. It leans towards
+    wherever spots cluster, and for a neighborhood split by water it can fall
+    in the water. Longitude can be averaged directly because no neighborhood in
+    the city straddles the antimeridian.
+    """
+    centre = StudySpot.objects.filter(neighborhood__iexact=name).aggregate(
+        latitude=Avg("latitude"), longitude=Avg("longitude")
+    )
+    # Both columns are NOT NULL, so the means are absent together: exactly
+    # when no row matched.
+    if centre["latitude"] is None or centre["longitude"] is None:
+        return None
+    return Coordinates(latitude=centre["latitude"], longitude=centre["longitude"])
 
 
 class BoroughField(serializers.CharField):
@@ -282,8 +328,74 @@ class SpotQuerySerializer(StrictQuerySerializer):
         "every other spot is excluded when this filter is used."
     )
 
+    near_lat = serializers.FloatField(
+        required=False,
+        min_value=-90.0,
+        max_value=90.0,
+        help_text="Latitude to order by distance from. Requires near_lng.",
+    )
+    near_lng = serializers.FloatField(
+        required=False,
+        min_value=-180.0,
+        max_value=180.0,
+        help_text="Longitude to order by distance from. Requires near_lat.",
+    )
+    near_neighborhood = filter_field(
+        "Order by distance from the mean position of this neighborhood's spots. "
+        "Matched like the neighborhood filter, case-insensitive and exact. Only "
+        "the order changes: spots in other neighborhoods are still returned. "
+        "Cannot be combined with near_lat and near_lng."
+    )
+
     limit = limit_field()
     offset = offset_field()
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        """Replace the near parameters with one ``near`` value.
+
+        ``near`` is a :class:`Coordinates` or None. A neighborhood is resolved
+        to its centre here, so the view handles a single kind of point. Every
+        unusable combination is rejected rather than ignored, for the same
+        reason unknown parameters are: a request that silently fell back to
+        alphabetical order would look like it worked.
+
+        Presence is tested with ``is not None`` because 0 is a real latitude and
+        a real longitude, and a truthiness test would treat it as absent.
+        """
+        latitude = attrs.pop("near_lat", None)
+        longitude = attrs.pop("near_lng", None)
+        neighborhood = attrs.pop("near_neighborhood", None)
+
+        if neighborhood is not None:
+            if latitude is not None or longitude is not None:
+                raise serializers.ValidationError(
+                    {
+                        "near_neighborhood": (
+                            "Supply either near_neighborhood or near_lat and near_lng, not both."
+                        )
+                    }
+                )
+            centre = neighborhood_centre(neighborhood)
+            if centre is None:
+                raise serializers.ValidationError(
+                    {
+                        "near_neighborhood": f"No study spots are in a neighborhood named {neighborhood!r}."
+                    }
+                )
+            attrs["near"] = centre
+            return attrs
+
+        if latitude is not None and longitude is not None:
+            attrs["near"] = Coordinates(latitude=latitude, longitude=longitude)
+            return attrs
+        if latitude is None and longitude is None:
+            attrs["near"] = None
+            return attrs
+
+        missing = "near_lng" if longitude is None else "near_lat"
+        raise serializers.ValidationError(
+            {missing: "near_lat and near_lng must be supplied together."}
+        )
 
 
 class SpotSearchQuerySerializer(StrictQuerySerializer):

@@ -18,6 +18,8 @@ export type Channel = {
 	name: string;
 	position: number;
 	private?: boolean;
+	password_protected?: boolean;
+	locked?: boolean;
 	read_only?: boolean;
 	slowmode_seconds?: number;
 	topic?: string;
@@ -46,6 +48,7 @@ export type Member = {
 	role: 'member' | 'moderator';
 	joined_at: string;
 };
+export type MemberPresence = { online: boolean; last_seen: string | null };
 export type GuestMember = {
 	id: number;
 	display_name: string;
@@ -60,7 +63,16 @@ export type Invite = {
 	uses: number;
 	revoked: boolean;
 };
-export type DirectConversation = { id: number; other_name: string; updated_at: string };
+export type DirectConversation = {
+	id: number;
+	other_name: string;
+	updated_at: string;
+	kind?: 'direct' | 'group';
+	member_count?: number;
+	member_names?: string[];
+	unread_count?: number;
+	pinned?: boolean;
+};
 export type DirectMessage = {
 	reactions?: Message['reactions'];
 	pinned_at?: string | null;

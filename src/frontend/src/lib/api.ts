@@ -7,7 +7,15 @@
  * to know a hostname.
  */
 
-import type { ErrorDetail, ErrorEnvelope, Facets, SpotFilters, SpotPage } from './contract';
+import type {
+	ErrorDetail,
+	ErrorEnvelope,
+	Facets,
+	Near,
+	NearbySpotPage,
+	SpotFilters,
+	SpotPage
+} from './contract';
 
 /** Matches the API's own default page size, so the first page agrees. */
 export const DEFAULT_LIMIT = 20;
@@ -43,7 +51,12 @@ export function isErrorEnvelope(body: unknown): body is ErrorEnvelope {
 /** The dependency tests replace, rather than reaching for a global stub. */
 export type Fetcher = typeof globalThis.fetch;
 
-async function get(path: string, parameters: URLSearchParams, fetcher: Fetcher): Promise<SpotPage> {
+/** `Page` is trusted, not checked: the caller names the shape its endpoint serves. */
+async function get<Page>(
+	path: string,
+	parameters: URLSearchParams,
+	fetcher: Fetcher
+): Promise<Page> {
 	let response: Response;
 	try {
 		response = await fetcher(`${path}?${parameters}`, {
@@ -73,7 +86,7 @@ async function get(path: string, parameters: URLSearchParams, fetcher: Fetcher):
 		throw new ApiError('error', `The API returned ${response.status}.`, response.status);
 	}
 
-	return body as SpotPage;
+	return body as Page;
 }
 
 export type SearchOptions = {
@@ -114,7 +127,7 @@ function withFilters(parameters: URLSearchParams, filters: SpotFilters = {}): UR
 export function searchSpots(query: string, options: SearchOptions = {}): Promise<SpotPage> {
 	const { limit = DEFAULT_LIMIT, offset = 0, fetcher = globalThis.fetch } = options;
 
-	return get(
+	return get<SpotPage>(
 		'/api/spots/search',
 		withFilters(
 			new URLSearchParams({ q: query, limit: String(limit), offset: String(offset) }),
@@ -128,7 +141,7 @@ export function searchSpots(query: string, options: SearchOptions = {}): Promise
 export function listSpots(options: SearchOptions = {}): Promise<SpotPage> {
 	const { limit = DEFAULT_LIMIT, offset = 0, fetcher = globalThis.fetch } = options;
 
-	return get(
+	return get<SpotPage>(
 		'/api/spots',
 		withFilters(
 			new URLSearchParams({ limit: String(limit), offset: String(offset) }),
@@ -136,6 +149,35 @@ export function listSpots(options: SearchOptions = {}): Promise<SpotPage> {
 		),
 		fetcher
 	);
+}
+
+/**
+ * Fetch one page ordered nearest first from `near`, each spot with its distance.
+ *
+ * The same endpoint and filters as `listSpots`; only the order and the extra
+ * `distance_metres` differ. There is no ranked-search counterpart, because
+ * `GET /spots/search` orders by relevance and takes no point.
+ */
+export function listSpotsNear(near: Near, options: SearchOptions = {}): Promise<NearbySpotPage> {
+	const { limit = DEFAULT_LIMIT, offset = 0, fetcher = globalThis.fetch } = options;
+
+	const parameters = withFilters(
+		new URLSearchParams({ limit: String(limit), offset: String(offset) }),
+		options.filters
+	);
+	switch (near.kind) {
+		case 'point':
+			parameters.set('near_lat', String(near.latitude));
+			parameters.set('near_lng', String(near.longitude));
+			break;
+		case 'neighborhood':
+			parameters.set('near_neighborhood', near.name);
+			break;
+		default:
+			near satisfies never;
+	}
+
+	return get<NearbySpotPage>('/api/spots', parameters, fetcher);
 }
 
 export type FacetOptions = {

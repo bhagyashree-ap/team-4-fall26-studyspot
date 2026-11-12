@@ -5,7 +5,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from django.db.models import Count, Q, QuerySet
+from django.db.models import Count, Expression, F, IntegerField, Q, QuerySet, Value
+from django.db.models.functions import ASin, Cast, Cos, Least, Power, Radians, Round, Sin, Sqrt
 from rest_framework import status
 from rest_framework.exceptions import NotFound, PermissionDenied
 from rest_framework.permissions import IsAuthenticated
@@ -19,12 +20,43 @@ from accounts.models import Account, AccountType
 from .models import StudySpot
 from .search import expanded_words, search
 from .serializers import (
+    Coordinates,
     ListingSerializer,
+    NearbySpotSerializer,
     SpotFacetsQuerySerializer,
     SpotQuerySerializer,
     SpotSearchQuerySerializer,
     StudySpotSerializer,
 )
+
+#: Mean Earth radius, the same figure ``data/ingest.py`` measures
+#: ``subway_metres`` and ``nearby_spots`` with, so every distance the API
+#: reports is on one scale.
+EARTH_RADIUS_METRES = 6_371_000.0
+
+
+def distance_from(origin: Coordinates) -> Expression:
+    """Straight-line metres from ``origin`` to each row, by the haversine formula.
+
+    Computed in SQL rather than in Python so that ordering and paging stay in
+    the database: sorting in Python would mean loading every matching row to
+    serve twenty. Plain Postgres has no geography type here, and a few thousand
+    rows do not justify adding PostGIS.
+
+    ``Least`` caps the haversine term at 1. Rounding can push it a hair past 1
+    for a point near the antipode, and ``asin`` raises on anything above 1
+    rather than returning pi/2.
+    """
+    latitude = Radians(F("latitude"))
+    origin_latitude = Radians(Value(origin.latitude))
+    half_latitude = (latitude - origin_latitude) / Value(2.0)
+    half_longitude = (Radians(F("longitude")) - Radians(Value(origin.longitude))) / Value(2.0)
+
+    haversine = Power(Sin(half_latitude), 2) + Cos(origin_latitude) * Cos(latitude) * Power(
+        Sin(half_longitude), 2
+    )
+    return Value(2.0 * EARTH_RADIUS_METRES) * ASin(Sqrt(Least(haversine, Value(1.0))))
+
 
 #: Maps a validated query parameter to the lookup it filters with. Substring for
 #: the name, exact for the rest, all case-insensitive. A `neighborhood` filter
@@ -106,7 +138,14 @@ def apply_filters(queryset: QuerySet[StudySpot], parameters: dict[str, Any]) -> 
 
 
 class SpotListView(APIView):
-    """``GET /spots`` -- a filtered, paginated page of study spots."""
+    """``GET /spots`` -- a filtered, paginated page of study spots.
+
+    With ``near_lat`` and ``near_lng``, or with ``near_neighborhood``, the page
+    is ordered nearest first and each item carries ``distance_metres``; without
+    them it is alphabetical and the items are the plain summary. The query
+    serializer turns either form into one point, so both share
+    :func:`distance_from`.
+    """
 
     def get(self, request: Request) -> Response:
         query = SpotQuerySerializer(data=request.query_params)
@@ -115,13 +154,27 @@ class SpotListView(APIView):
 
         limit: int = parameters["limit"]
         offset: int = parameters["offset"]
+        near: Coordinates | None = parameters["near"]
 
         matching = apply_filters(StudySpot.objects.all(), parameters)
 
-        # Counted before slicing, because the envelope reports the size of the
-        # whole result set rather than of this page.
+        # Counted before ordering by distance and before slicing: the envelope
+        # reports the size of the whole result set, and the count needs neither.
         total = matching.count()
-        items = StudySpotSerializer(matching[offset : offset + limit], many=True).data
+
+        if near is None:
+            items = StudySpotSerializer(matching[offset : offset + limit], many=True).data
+        else:
+            # Ordered by the exact distance and served rounded, so two spots a
+            # few centimetres apart still come out in a fixed order. The id
+            # breaks exact ties, which keeps paging total as it is without a
+            # point.
+            nearest = (
+                matching.alias(distance=distance_from(near))
+                .annotate(distance_metres=Cast(Round(F("distance")), IntegerField()))
+                .order_by("distance", "id")
+            )
+            items = NearbySpotSerializer(nearest[offset : offset + limit], many=True).data
 
         return Response(
             {

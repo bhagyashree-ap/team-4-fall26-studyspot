@@ -3,6 +3,7 @@
 	import { Textarea } from '$lib/components/ui/textarea';
 	import SearchMessages from './SearchMessages.svelte';
 	import MessageLink from './MessageLink.svelte';
+	import MessageActions from './MessageActions.svelte';
 	import LinkedMessage from './LinkedMessage.svelte';
 	import Ballot from './Ballot.svelte';
 	import ComposerTools from './ComposerTools.svelte';
@@ -37,7 +38,8 @@
 		role,
 		names = [],
 		onShare,
-		onDirectMessage
+		onDirectMessage,
+		onMemberSelect
 	}: {
 		communityId: number;
 		channel: Channel;
@@ -45,6 +47,7 @@
 		role: string;
 		onShare: () => void;
 		onDirectMessage: (conversation: DirectConversation) => void;
+		onMemberSelect: (name: string, event: MouseEvent) => void;
 	} = $props();
 
 	let messages = $state<Message[]>([]);
@@ -285,6 +288,23 @@
 		}
 	}
 
+	function handleMessageAction(
+		message: Message,
+		action: 'reply' | 'pin' | 'thread' | 'unread' | 'edit' | 'delete'
+	) {
+		if (action === 'reply') replyTo = message;
+		else if (action === 'thread') thread = message;
+		else if (action === 'unread') void mark(message.id);
+		else if (action === 'edit' && message.mine) {
+			editingId = message.id;
+			draft = message.content;
+		} else if (action === 'delete' && message.can_delete) {
+			if (confirm('Delete this message?')) void change(message, 'DELETE');
+		} else if (action === 'pin' && (role === 'owner' || role === 'moderator')) {
+			void change(message, message.pinned_at ? 'DELETE' : 'POST', '/pin');
+		}
+	}
+
 	async function loadPins() {
 		try {
 			pins = (await communityRequest<{ items: Message[] }>(`${base()}/pins`)).items;
@@ -445,7 +465,7 @@
 						<span>#</span>
 					</div>
 					<h3>Welcome to #{channel.name}</h3>
-					<p>This is the beginning of the #{channel.name} channel.</p>
+					<p>Say hello, ask a question, or share what you’re working on.</p>
 				</div>
 			{/if}
 			{#each messages as message, i (message.id)}
@@ -463,15 +483,40 @@
 					class:grouped={!header}
 					class:deleted={!!message.deleted_at}
 					id={`message-${message.id}`}
+					ondblclick={(event) => {
+						if (
+							message.deleted_at ||
+							(event.target as HTMLElement).closest('button, a, input, textarea')
+						)
+							return;
+						event.preventDefault();
+						const trigger = event.currentTarget.querySelector<HTMLButtonElement>('.action-trigger');
+						if (trigger) {
+							trigger.dataset.contextX = String(event.clientX);
+							trigger.dataset.contextY = String(event.clientY);
+							trigger.click();
+						}
+					}}
+					oncontextmenu={(event) => {
+						if (message.deleted_at) return;
+						event.preventDefault();
+						const trigger = event.currentTarget.querySelector<HTMLButtonElement>('.action-trigger');
+						if (!trigger) return;
+						trigger.dataset.contextX = String(event.clientX);
+						trigger.dataset.contextY = String(event.clientY);
+						trigger.click();
+					}}
 				>
 					{#if header}
-						<div
+						<button
 							class="avatar"
 							style="background:{avatarColor(message.author_name)}"
-							aria-hidden="true"
+							title={`View ${message.author_name}'s profile`}
+							aria-label={`View ${message.author_name}'s profile`}
+							onclick={(event) => onMemberSelect(message.author_name, event)}
 						>
 							{initials(message.author_name)}
-						</div>
+						</button>
 					{:else}
 						<div class="avatar-gap" aria-hidden="true">
 							<time class="hover-time"
@@ -485,7 +530,11 @@
 					<div class="msg-body">
 						{#if header}
 							<div class="msg-head">
-								<strong class="author">{message.author_name}</strong>
+								<button
+									class="author profile-author"
+									onclick={(event) => onMemberSelect(message.author_name, event)}
+									>{message.author_name}</button
+								>
 								<time class="timestamp" datetime={message.created_at}
 									>{formatTime(message.created_at)}</time
 								>
@@ -563,6 +612,11 @@
 
 					{#if !message.deleted_at}
 						<div class="msg-actions" role="toolbar" aria-label="Message actions">
+							<MessageActions
+								{message}
+								onaction={(action) => handleMessageAction(message, action)}
+								onreact={(emoji) => void change(message, 'POST', '/reactions', { emoji })}
+							/>
 							<EmojiPicker
 								reaction
 								onpick={(emoji) => void change(message, 'POST', '/reactions', { emoji })}
@@ -919,6 +973,9 @@
 		margin-top: 3px;
 		flex-shrink: 0;
 		user-select: none;
+		padding: 0;
+		border: 0;
+		cursor: pointer;
 	}
 	.avatar-gap {
 		width: 36px;
@@ -949,9 +1006,19 @@
 		margin-bottom: 3px;
 	}
 	.author {
+		padding: 0;
+		border: 0;
+		background: transparent;
+		font: inherit;
 		font-size: 15px;
 		font-weight: 700;
 		color: var(--ink);
+		cursor: pointer;
+	}
+	.author:hover {
+		color: var(--accent-text);
+		text-decoration: underline;
+		text-underline-offset: 2px;
 	}
 	.timestamp {
 		font-size: 11px;

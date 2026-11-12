@@ -120,7 +120,7 @@ Cafés never carry one. A café is a third place in its own right rather than so
 
 `total` counts every spot matching the filters, ignoring the page window. `count` is the number of items on this page, and `has_more` is true when `offset + count < total`.
 
-Results are ordered by name, then by identifier. Because the identifier is unique, that sort key is total, so paging over an unchanged dataset never repeats or skips a spot. What the contract promises is that the order does not move between requests, not the exact sequence: where in the alphabet punctuation and digits fall is the database collation's business.
+Results are ordered by name, then by identifier. Because the identifier is unique, that sort key is total, so paging over an unchanged dataset never repeats or skips a spot. What the contract promises is that the order does not move between requests, not the exact sequence: where in the alphabet punctuation and digits fall is the database collation's business. A request that names a point is ordered by distance instead; see [Ordering by distance](#ordering-by-distance).
 
 ### Query parameters
 
@@ -130,6 +130,9 @@ Results are ordered by name, then by identifier. Because the identifier is uniqu
 | `neighborhood` | string | — | Case-insensitive exact match. |
 | `borough` | string | — | Case-insensitive exact match on one of the five borough names. |
 | `university` | string | — | Case-insensitive exact match. Spots with no curated campus affiliation are excluded. |
+| `near_lat` | number | — | Latitude to order by distance from, between -90 and 90. Requires `near_lng`. |
+| `near_lng` | number | — | Longitude to order by distance from, between -180 and 180. Requires `near_lat`. |
+| `near_neighborhood` | string | — | Order by distance from the mean position of this neighborhood's spots. Case-insensitive exact match. Cannot be combined with `near_lat` and `near_lng`. |
 | `limit` | integer | `20` | Page size, between 1 and 100. |
 | `offset` | integer | `0` | Rows to skip before the page starts. |
 
@@ -142,6 +145,66 @@ Unknown query parameters are rejected rather than ignored, so a misspelled filte
 ```shell
 curl --fail 'http://localhost:7501/spots?borough=Brooklyn&name=library&limit=5'
 ```
+
+### Ordering by distance
+
+`near_lat` and `near_lng` together, or `near_neighborhood` alone, order the page nearest first, and every item gains one field beside the [summary](#study-spot-summary):
+
+```shell
+curl --fail 'http://localhost:7501/spots?near_lat=40.7336&near_lng=-74.0027&limit=2'
+```
+
+```json
+{
+  "items": [
+    {
+      "id": "osm:n2358048512",
+      "name": "Starbucks",
+      "distance_metres": 43
+    },
+    {
+      "id": "osm:n4320014581",
+      "name": "Bar Pisellino",
+      "distance_metres": 86
+    }
+  ],
+  "pagination": {
+    "limit": 2,
+    "offset": 0,
+    "count": 2,
+    "total": 3772,
+    "has_more": true
+  }
+}
+```
+
+The items are shortened here; each carries every summary field as well.
+
+`distance_metres` is the straight-line distance from the requested point, rounded to the whole metre. It is measured by the haversine formula on the same 6,371 km sphere as `subway_metres` and `nearby_spots`, so every distance the API reports is on one scale, and like `subway_metres` **it is not a walking distance**. It is present only on a request that names a point: without one the items are exactly the summary, so a client that never asks for a distance never sees the field.
+
+**Only the order changes.** The filters narrow first, exactly as they do without a point, and `total` counts the same set. The page is ordered by the exact distance and then by identifier, so two spots that round to the same metre still come out in a fixed order and paging stays total, as it is alphabetically. `0` is a coordinate rather than an absence, and the bounds are inclusive: `?near_lat=90&near_lng=-180` is accepted.
+
+`near_neighborhood` orders from the mean position of every spot in that neighborhood, matched like the `neighborhood` filter — case-insensitive and exact, so `Greenwich` does not stand in for `Greenwich Village`. It is a mean of points rather than a geographic centre: it leans towards wherever the spots cluster, and for a neighborhood split by water it can fall in the water. **It orders rather than filters.** Spots in other neighborhoods are still returned, after the nearer ones; add the `neighborhood` filter as well to keep only that neighborhood. The centre is worked out from every spot in the neighborhood, not only the ones the other filters leave, so it is a place rather than a result and does not move as filters change.
+
+```shell
+curl --fail 'http://localhost:7501/spots?near_neighborhood=greenwich%20village&no_purchase_needed=true'
+```
+
+Only `GET /spots` takes these parameters. `GET /spots/search` orders by relevance and takes no point, so it rejects them as unknown parameters.
+
+Every unusable combination is a `422` rather than being ignored, for the same reason an unknown parameter is: a request that quietly fell back to alphabetical order would look as though it had worked.
+
+| Request | `field` | `type` | `message` |
+|---|---|---|---|
+| `?near_lat=40.7` — one coordinate only | `query.near_lng` | `invalid` | `near_lat and near_lng must be supplied together.` |
+| `?near_lat=90.1&near_lng=0` — latitude out of range | `query.near_lat` | `max_value` | `Ensure this value is less than or equal to 90.0.` |
+| `?near_lat=0&near_lng=-180.1` — longitude out of range | `query.near_lng` | `min_value` | `Ensure this value is greater than or equal to -180.0.` |
+| `?near_lat=north&near_lng=0` — not a number, including `nan` and `inf` | `query.near_lat` | `invalid` | `A valid number is required.` |
+| `?near_neighborhood=Atlantis` — no spot is in it | `query.near_neighborhood` | `invalid` | `No study spots are in a neighborhood named 'Atlantis'.` |
+| `?near_neighborhood=Greenwich%20Village&near_lat=40.7&near_lng=-73.9` — both kinds | `query.near_neighborhood` | `invalid` | `Supply either near_neighborhood or near_lat and near_lng, not both.` |
+| `?near_neighborhood=` — blank | `query.near_neighborhood` | `invalid` | `This field may not be blank.` |
+
+A single coordinate is reported against the one that is missing. A neighborhood with any coordinate is reported against `near_neighborhood`, even when that coordinate's partner is also missing, because no second coordinate would make the request valid.
 
 ## Errors
 

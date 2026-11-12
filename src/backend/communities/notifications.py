@@ -5,7 +5,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework.response import Response
 
-from .dm_views import person_key
+from .dm_views import person_key, visible_conversations
 from .message_views import authenticated, author_name
 from .models import DirectMessage, GuestMembership, Membership, Message, RoomMemberState
 from .views import CommunityView, guest_id
@@ -61,9 +61,16 @@ class Notifications(CommunityView):
         mentioned = direct_mention | Q(mentions__contains=["role:everyone"])
         for role, condition in [("member", member), ("owner", owner), ("moderator", mod)]:
             mentioned |= condition & Q(mentions__contains=["role:" + role])
-        channels = Message.objects.filter(
-            owner | mod | (member & Q(channel__private=False))
-        ).exclude(own_messages)
+        channels = (
+            Message.objects.filter(owner | mod | (member & Q(channel__private=False)))
+            .filter(
+                Q(channel__password_hash="")
+                | Q(channel_id__in=request.session.get("unlocked_channels", []))
+                | owner
+                | mod
+            )
+            .exclude(own_messages)
+        )
         channel_rows = list(
             unread(channels, key, "channel_id", mentioned).values(
                 "id",
@@ -77,7 +84,7 @@ class Notifications(CommunityView):
             )[:30]
         )
         private = DirectMessage.objects.filter(
-            Q(conversation__first_key=key) | Q(conversation__second_key=key)
+            conversation_id__in=visible_conversations(key).values("pk")
         ).exclude(sender_key=key)
         dm_rows = list(
             unread(private, key, "conversation_id", direct_mention).values(
