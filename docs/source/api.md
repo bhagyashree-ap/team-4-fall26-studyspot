@@ -19,6 +19,7 @@ No route has a trailing slash, and the application does not redirect one onto th
 | `POST /listings` | Creates a listing owned by the caller. Needs a bearer token for a business account. |
 | `PATCH /listings/{id}` | Updates one of the caller's own listings. Needs a bearer token for a business account. |
 | `DELETE /listings/{id}` | Deletes one of the caller's own listings. Needs a bearer token for a business account. |
+| `/board/*` | Public discussions, tags, comments, and private report submission. See [Public board](board.md). |
 
 `GET /health/live` returns:
 

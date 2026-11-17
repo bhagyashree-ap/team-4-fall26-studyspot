@@ -64,11 +64,27 @@ include = ["communities/**"]
 unresolved-attribute = "ignore"
 invalid-type-form = "ignore"
 
+[[tool.ty.overrides]]
+include = [
+    "board/admin.py",
+    "board/identity.py",
+    "board/models.py",
+    "board/serializers.py",
+    "board/views.py",
+    "board/tests/conftest.py",
+    "board/tests/test_access.py",
+    "board/tests/test_discussions.py",
+    "board/tests/test_reports.py",
+]
+
+[tool.ty.overrides.rules]
+unresolved-attribute = "ignore"
+
 [tool.pytest.ini_options]
 # studyspot.settings_test supplies the debug and secret-key values the real
 # settings module requires, then defers to it. See its docstring.
 DJANGO_SETTINGS_MODULE = "studyspot.settings_test"
-testpaths = ["spots", "accounts", "communities"]
+testpaths = ["spots", "accounts", "communities", "board"]
 addopts = ["-ra", "--strict-markers"]
 
 [dependency-groups]

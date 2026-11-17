@@ -1,0 +1,399 @@
+.board {
+	max-width: 1160px;
+	margin: 0 auto;
+	padding: 0 32px 64px;
+	color: var(--color-text);
+	background: white;
+	line-height: 1.55;
+	overflow-wrap: anywhere;
+	accent-color: var(--color-brand-hover);
+	caret-color: var(--color-brand-hover);
+}
+
+.board ::selection {
+	color: var(--color-text);
+	background: #ffd8e0;
+}
+
+.board main {
+	padding-top: 32px;
+}
+
+.board h1,
+.board h2,
+.board p {
+	margin: 0;
+}
+
+.board h1 {
+	font-size: clamp(24px, 3vw, 32px);
+	font-weight: 750;
+	line-height: 1.25;
+	letter-spacing: -0.025em;
+}
+
+.board h2 {
+	font-size: 21px;
+	font-weight: 700;
+	line-height: 1.35;
+	letter-spacing: -0.015em;
+}
+
+.board p + p,
+.board h1 + p,
+.board h2 + p {
+	margin-top: 10px;
+}
+
+.board main :is(button, input, textarea, select) {
+	font: inherit;
+}
+
+.board main :is(button, .board-button, .board-primary, .board-back) {
+	display: inline-flex;
+	min-height: 44px;
+	align-items: center;
+	justify-content: center;
+	padding: 9px 16px;
+	border: 1px solid var(--color-border);
+	border-radius: 8px;
+	color: var(--color-text);
+	background: white;
+	font-size: 14px;
+	font-weight: 650;
+	line-height: 1.4;
+	text-align: center;
+	cursor: pointer;
+}
+
+.board main :is(button, .board-button, .board-back):hover:not(:disabled) {
+	background: #f7f7f7;
+}
+
+.board main :is(button.board-primary, a.board-primary) {
+	border-color: var(--color-brand-hover);
+	color: white;
+	background: var(--color-brand-hover);
+}
+
+.board main :is(button.board-primary, a.board-primary):hover:not(:disabled) {
+	background: #b80935;
+}
+
+.board main :disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.board main :is(a, button, input, textarea, select):focus-visible {
+	outline: 3px solid var(--color-brand-hover);
+	outline-offset: 3px;
+}
+
+.board main :is(input, textarea, select) {
+	width: 100%;
+	min-width: 0;
+	min-height: 44px;
+	padding: 10px 12px;
+	border: 1px solid #a4a4a4;
+	border-radius: 8px;
+	color: var(--color-text);
+	background: white;
+}
+
+.board input::placeholder,
+.board textarea::placeholder {
+	color: var(--color-muted);
+	opacity: 1;
+}
+
+.board textarea {
+	resize: vertical;
+}
+
+.board fieldset {
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.board label,
+.board legend {
+	font-size: 14px;
+	font-weight: 650;
+}
+
+.board .board-field {
+	display: grid;
+	min-width: 0;
+	gap: 6px;
+}
+
+.board .board-muted,
+.board .board-help,
+.board .board-meta {
+	color: var(--color-muted);
+}
+
+.board .board-help {
+	font-size: 13px;
+	line-height: 1.6;
+}
+
+.board .board-help a {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.board .board-heading,
+.board .board-tag-entry,
+.board .board-actions {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.board .board-heading {
+	justify-content: space-between;
+	margin-bottom: 16px;
+}
+
+.board .board-actions {
+	margin-top: 14px;
+}
+
+.board .board-heading .board-primary {
+	flex-shrink: 0;
+}
+
+.board .board-filters {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 16px;
+	margin: 28px 0 24px;
+	padding: 24px 0;
+	border-top: 1px solid var(--color-border);
+	border-bottom: 1px solid var(--color-border);
+}
+
+.board .board-keyword,
+.board .board-filter-actions {
+	grid-column: 1 / -1;
+}
+
+.board .board-filter-actions {
+	margin-top: 0;
+}
+
+.board .board-feed,
+.board .board-comment-list,
+.board .board-tags,
+.board .board-suggestions {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.board .board-feed-post,
+.board .board-comment {
+	padding: 24px 0;
+	border-bottom: 1px solid var(--color-border);
+}
+
+.board .board-feed-post h2 {
+	margin: 8px 0;
+}
+
+.board .board-feed-post h2 a {
+	display: inline-block;
+	min-height: 44px;
+	padding: 8px 0;
+	text-decoration-thickness: 1px;
+	text-underline-offset: 4px;
+}
+
+.board .board-feed-post h2 a:hover {
+	text-decoration: underline;
+}
+
+.board .board-meta {
+	display: flex;
+	align-items: baseline;
+	gap: 8px 14px;
+	flex-wrap: wrap;
+	font-size: 13px;
+}
+
+.board .board-body {
+	max-width: 75ch;
+	margin-top: 20px;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	line-height: 1.75;
+}
+
+.board .board-preview {
+	display: -webkit-box;
+	margin-top: 12px;
+	overflow: hidden;
+	-webkit-box-orient: vertical;
+	-webkit-line-clamp: 3;
+}
+
+.board .board-tags {
+	display: flex;
+	gap: 8px;
+	flex-wrap: wrap;
+	margin-top: 16px;
+}
+
+.board .board-tags li {
+	min-width: 0;
+	max-width: 100%;
+}
+
+.board .board-tags a,
+.board .board-selected-tag {
+	display: flex;
+	min-height: 44px;
+	align-items: center;
+	gap: 5px;
+	padding: 8px 10px;
+	border: 1px solid var(--color-border);
+	border-radius: 8px;
+	font-size: 13px;
+	line-height: 1.4;
+	background: #fafafa;
+}
+
+.board .board-tags a {
+	flex-wrap: wrap;
+}
+
+.board .board-tags a:hover {
+	background: #f0f0f0;
+}
+
+.board .board-selected-tag {
+	flex-wrap: wrap;
+	padding: 4px 4px 4px 10px;
+}
+
+.board .board-selected-tag button {
+	flex-shrink: 0;
+}
+
+.board .board-back {
+	margin-bottom: 24px;
+}
+
+.board .board-detail {
+	max-width: 860px;
+	padding-bottom: 28px;
+}
+
+.board .board-detail h1 {
+	margin: 10px 0 16px;
+}
+
+.board .board-composer {
+	max-width: 820px;
+}
+
+.board .board-composer h1 {
+	margin-bottom: 24px;
+}
+
+.board .board-composer > fieldset > .board-field,
+.board .board-tag-picker {
+	margin-bottom: 20px;
+}
+
+.board .board-tag-picker legend {
+	margin-bottom: 8px;
+}
+
+.board .board-tag-entry {
+	align-items: end;
+	margin-top: 12px;
+}
+
+.board .board-grow {
+	flex: 1;
+	min-width: 150px;
+}
+
+.board .board-suggestions {
+	display: grid;
+	gap: 4px;
+	max-height: 260px;
+	overflow-y: auto;
+	margin-top: 8px;
+}
+
+.board .board-suggestions button {
+	width: 100%;
+	justify-content: flex-start;
+	text-align: left;
+}
+
+.board .board-report {
+	margin-top: 12px;
+}
+
+.board .board-report-form {
+	max-width: 620px;
+	margin-top: 12px;
+}
+
+.board .board-comments {
+	max-width: 860px;
+	margin-top: 28px;
+	padding-top: 24px;
+	border-top: 1px solid var(--color-border);
+}
+
+.board .board-comment-composer {
+	margin-top: 28px;
+}
+
+.board .board-comment-composer > button {
+	margin-top: 12px;
+}
+
+.board .board-empty {
+	padding: 32px 0;
+}
+
+.board .board-error {
+	margin: 16px 0;
+	color: #a1122b;
+}
+
+.board .board-error button {
+	margin-top: 8px;
+}
+
+@media (max-width: 640px) {
+	.board {
+		padding: 0 16px 40px;
+	}
+
+	.board main {
+		padding-top: 24px;
+	}
+
+	.board .board-filters {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.board .board-tag-entry {
+		align-items: stretch;
+	}
+
+	.board .board-tag-entry > .board-field {
+		flex-basis: 100%;
+	}
+}

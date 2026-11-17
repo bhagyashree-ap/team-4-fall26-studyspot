@@ -92,6 +92,9 @@ services:
         - action: sync
           path: ./src/backend/accounts
           target: /app/accounts
+        - action: sync
+          path: ./src/backend/board
+          target: /app/board
         - action: rebuild
           path: ./src/backend/pyproject.toml
         - action: rebuild

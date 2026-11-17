@@ -10,6 +10,8 @@ Tests live with the code they verify.
 | Data import | `data/test_ingest.py` | pytest |
 | Search ranking | `src/backend/spots/tests/test_search.py` | pytest with pytest-django |
 | Filter counts | `src/backend/spots/tests/test_facets.py` | pytest with pytest-django |
+| Public-board routes and ownership | `src/backend/board/tests/` | pytest with Postgres |
+| Public-board browser workflow | `src/frontend/qa/public-board.mjs` | Node test runner with Playwright and the real local API |
 | A running deployment | `tests/e2e/` | pytest over HTTP |
 
 Run every currently supported check:
@@ -53,9 +55,30 @@ regenerated whenever the upstream data changes and a test pinned to "48 spots
 in the Bronx" would fail on a perfectly good snapshot. Everything in them is a
 `GET`, so they are safe to run against the deployed site.
 
-They do not drive a browser. Component behaviour is covered by the frontend
-suite, which runs in a real browser against a mocked API; nothing currently
-tests a real browser against a real API, and `tests/e2e/README.md` says so.
+The public-board browser tests are separate from these deployment-safe HTTP
+tests. They use isolated browser sessions against the real local API and
+Postgres. They cover post and comment ownership, persistence, tags, search,
+failed-write draft recovery, private report evidence, staff access, and mobile
+layouts. The startup regression delays the real capabilities request and checks
+that loading does not erase a typed filter.
+
+From `src/frontend`, with a dedicated migrated database, imported study spots,
+and a local staff account:
+
+```shell
+DJANGO_DEBUG=true \
+PUBLIC_BOARD_URL=http://127.0.0.1:7500 \
+PUBLIC_BOARD_BACKEND_URL=http://127.0.0.1:7501 \
+DATABASE_URL="$LOCAL_BOARD_DATABASE_URL" \
+PUBLIC_BOARD_ADMIN_USERNAME="$LOCAL_ADMIN_USERNAME" \
+PUBLIC_BOARD_ADMIN_PASSWORD="$LOCAL_ADMIN_PASSWORD" \
+node --test qa/public-board.mjs
+```
+
+This command writes test-owned discussions and leaves private moderation
+evidence in the dedicated database. It refuses non-local application URLs.
+It does not verify hosted Auth0 login. Component tests elsewhere still use
+mocked API responses.
 
 ## The tests need Postgres
 

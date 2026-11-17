@@ -14,6 +14,7 @@ COPY studyspot ./studyspot
 COPY spots ./spots
 COPY communities ./communities
 COPY accounts ./accounts
+COPY board ./board
 COPY manage.py handler.py ./
 
 EXPOSE 8000

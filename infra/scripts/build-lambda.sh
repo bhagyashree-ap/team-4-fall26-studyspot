@@ -72,6 +72,7 @@ cp -R "${BACKEND_DIR}/studyspot" "${STAGE_DIR}/"
 cp -R "${BACKEND_DIR}/spots" "${STAGE_DIR}/"
 cp -R "${BACKEND_DIR}/communities" "${STAGE_DIR}/"
 cp -R "${BACKEND_DIR}/accounts" "${STAGE_DIR}/"
+cp -R "${BACKEND_DIR}/board" "${STAGE_DIR}/"
 cp "${BACKEND_DIR}/handler.py" "${STAGE_DIR}/"
 # Shipped so that `showmigrations` and anything else run through the management
 # function behaves the same as it does locally.

@@ -17,6 +17,7 @@ urlpatterns = [
     path("", include("spots.urls")),
     path("", include("communities.urls")),
     path("", include("accounts.urls")),
+    path("", include("board.urls")),
 ]
 
 if settings.ENABLE_ADMIN:

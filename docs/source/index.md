@@ -22,6 +22,7 @@ docker
 architecture
 api
 communities
+board
 accounts
 data-and-search
 database

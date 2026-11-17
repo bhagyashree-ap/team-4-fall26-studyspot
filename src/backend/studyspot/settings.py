@@ -89,12 +89,14 @@ INSTALLED_APPS = [
     "spots",
     "communities",
     "accounts",
+    "board",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     # Directly after SecurityMiddleware, as WhiteNoise requires.
     "whitenoise.middleware.WhiteNoiseMiddleware",
+    "board.middleware.BoardNoStoreMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
