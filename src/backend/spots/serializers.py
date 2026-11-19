@@ -7,6 +7,7 @@ and the search projection all agree on.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -19,6 +20,7 @@ from .models import (
     MAX_FILTER_LENGTH,
     MAX_LIMIT,
     Borough,
+    Review,
     StudySpot,
 )
 
@@ -451,3 +453,63 @@ class SpotFacetsQuerySerializer(StrictQuerySerializer):
     free_public_wifi = wifi_field()
     no_purchase_needed = cost_field()
     indoor_seating = indoor_seating_field()
+
+
+class ReviewWriteSerializer(serializers.ModelSerializer):
+    """What a student may write when reviewing a spot.
+
+    Every score is a whole number from 1 to 5 where 5 is best; for ``noise``
+    that means very quiet. The spot comes from the URL and the author from the
+    caller, so a body naming either -- or any other field -- is rejected rather
+    than quietly ignored.
+    """
+
+    class Meta:
+        model = Review
+        fields = ["rating", "noise", "wifi", "seating", "outlets", "body"]
+
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        if isinstance(data, Mapping):
+            unknown = sorted(set(data) - set(self.fields))
+            if unknown:
+                raise serializers.ValidationError(
+                    {name: "This field cannot be set on a review." for name in unknown}
+                )
+        return super().to_internal_value(data)
+
+
+class ReviewSerializer(serializers.ModelSerializer):
+    """A published review.
+
+    The author is identified by username alone, or null when the account has
+    none; the account's email address is never part of a review.
+    """
+
+    spot = serializers.CharField(source="spot_id", read_only=True)
+    author = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Review
+        fields = [
+            "id",
+            "spot",
+            "author",
+            "rating",
+            "noise",
+            "wifi",
+            "seating",
+            "outlets",
+            "body",
+            "created_at",
+            "updated_at",
+        ]
+
+    def get_author(self, review: Review) -> dict[str, str | None]:
+        return {"username": review.author.username or None}
+
+
+class ReviewQuerySerializer(StrictQuerySerializer):
+    """Query parameters for ``GET /spots/{id}/reviews``. Unknown parameters are rejected."""
+
+    limit = limit_field()
+    offset = offset_field()

@@ -11,6 +11,8 @@ No route has a trailing slash, and the application does not redirect one onto th
 | `GET /health/live` | Reports whether the API process can serve requests. It intentionally does not contact Postgres. |
 | `GET /spots` | Returns a filtered, paginated page of study spots. |
 | `GET /spots/{id}` | Returns one study spot. |
+| `GET /spots/{id}/reviews` | Returns a paginated page of a study spot's reviews, newest first. |
+| `POST /spots/{id}/reviews` | Reviews a study spot. Needs a bearer token for a student account. |
 | `GET /auth/config` | The public Auth0 settings the browser logs in with. See [Accounts](accounts.md). |
 | `GET /account` | The logged-in person's account. Needs a bearer token. |
 | `POST /account` | Finishes sign-up as a student or a business. Needs a bearer token. |
@@ -239,6 +241,60 @@ Removes only the authenticated account's favourite and returns `204` with no res
 
 Successful dataset refreshes preserve favourites for surviving imported spot IDs and all business-owned spots. They remove favourites only for imported IDs absent from the replacement. [Data lifecycle](database.md#data-lifecycle) describes empty replacements, owned-ID collisions, and failed refreshes.
 
+## Reviews
+
+A review is one student's public scores and comment for one study spot. Every score is a whole number from 1 to 5, and on every score 5 is the best answer:
+
+| Field | Required | Meaning of 5 |
+|---|---|---|
+| `rating` | Yes | Excellent overall. |
+| `noise` | No | Very quiet. |
+| `wifi` | No | Excellent Wi-Fi. |
+| `seating` | No | Easy to find a seat. |
+| `outlets` | No | Easy to find a power outlet. |
+
+An omitted optional score is `null`. `body` is free text of at most 2,000 characters and is `""` when omitted.
+
+### `POST /spots/{id}/reviews`
+
+Requires a bearer token for a student account. Each student reviews a spot at most once; editing and deleting a review are not available yet. The spot comes from the path and the author from the token, so a body that names `spot`, `author`, `created_at`, or any other unlisted field returns `422 validation_error`.
+
+```shell
+curl -X POST "http://localhost:7501/spots/facdb:eec118768e15a5e03d3354abda7b00da/reviews"   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json"   -d '{"rating": 4, "noise": 5, "outlets": 2, "body": "Quiet upstairs, few outlets."}'
+```
+
+A created review returns `201`:
+
+```json
+{
+  "id": 17,
+  "spot": "facdb:eec118768e15a5e03d3354abda7b00da",
+  "author": {"username": "ada"},
+  "rating": 4,
+  "noise": 5,
+  "wifi": null,
+  "seating": null,
+  "outlets": 2,
+  "body": "Quiet upstairs, few outlets.",
+  "created_at": "2026-11-18T20:51:03.120456Z",
+  "updated_at": "2026-11-18T20:51:03.120456Z"
+}
+```
+
+| Status | `code` | When |
+|---|---|---|
+| 401 | `unauthorized` | No bearer token, or one that does not verify. |
+| 403 | `forbidden` | The account is a business account or has not chosen an account type. |
+| 404 | `not_found` | No spot has the identifier. |
+| 409 | `conflict` | This student has already reviewed the spot, including when two requests race. |
+| 422 | `validation_error` | A score is missing, not a whole number, or outside 1 to 5; `body` is too long; or the body names an unknown field. |
+
+### `GET /spots/{id}/reviews`
+
+Public; no token is needed. Returns the same `items` and `pagination` envelope as [Listing study spots](#listing-study-spots), with the review shape above. The only query parameters are `limit` (1 to 100, default 20) and `offset` (default 0); any other parameter, or a value out of range, returns `422 validation_error`. An unknown spot returns `404 not_found`.
+
+Reviews are newest first, ordered by descending creation time and then descending review ID. `author.username` is `null` when the account has no username. A review never includes the author's email address.
+
 ## Errors
 
 Every non-2xx response uses one envelope:
@@ -264,10 +320,10 @@ Every non-2xx response uses one envelope:
 | Status | `code` | Raised when |
 |---|---|---|
 | 401 | `unauthorized` | A protected route was called without a bearer token, or with one that does not verify. |
-| 403 | `forbidden` | A listing route was called by an account that is not a business account. |
-| 404 | `not_found` | No spot has the requested identifier, or the caller owns no matching listing. Idempotent favourite removal does not return this error. |
+| 403 | `forbidden` | A listing route was called by an account that is not a business account, or a review was written by an account that is not a student account. |
+| 404 | `not_found` | No spot has the requested identifier, including when reading or writing its reviews, or the caller owns no matching listing. Idempotent favourite removal does not return this error. |
 | 405 | `method_not_allowed` | The route exists but the method does not. |
-| 409 | `conflict` | Sign-up was already finished, or a favourites operation requires a completed student account. |
+| 409 | `conflict` | Sign-up was already finished, a favourites operation requires a completed student account, or the student has already reviewed the spot. |
 | 422 | `validation_error` | A parameter is missing, malformed, out of range, or unrecognized. |
 | 500 | `internal_error` | An unhandled failure. The cause is logged, never returned. |
 | 503 | `database_unavailable` | Postgres could not answer the query, or has never been migrated. |

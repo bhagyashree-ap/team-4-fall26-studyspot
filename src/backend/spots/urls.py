@@ -16,6 +16,7 @@ from .views import (
     SpotDetailView,
     SpotFacetsView,
     SpotListView,
+    SpotReviewsView,
     SpotSearchView,
 )
 
@@ -30,4 +31,5 @@ urlpatterns = [
     path("spots/search", SpotSearchView.as_view(), name="spot-search"),
     path("spots/facets", SpotFacetsView.as_view(), name="spot-facets"),
     path("spots/<str:spot_id>", SpotDetailView.as_view(), name="spot-detail"),
+    path("spots/<str:spot_id>/reviews", SpotReviewsView.as_view(), name="spot-reviews"),
 ]

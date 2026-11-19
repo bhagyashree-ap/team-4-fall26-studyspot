@@ -410,3 +410,79 @@ class StudySpot(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.borough})"
+
+
+#: Every review score is on one scale, and on that scale 5 is always the best
+#: answer -- including ``noise``, where 5 means very quiet. One direction for
+#: every column is what lets a reader, and any later average, compare them
+#: without a per-field legend.
+MIN_SCORE = 1
+MAX_SCORE = 5
+
+#: Longest review text, in characters.
+MAX_REVIEW_BODY = 2000
+
+#: The scores a reviewer may leave out, alongside the required ``rating``.
+OPTIONAL_SCORES = ("noise", "wifi", "seating", "outlets")
+
+
+def score_field(help_text: str, *, optional: bool) -> models.SmallIntegerField:
+    """A 1-to-5 score where 5 is best. The database check is in Review.Meta."""
+    return models.SmallIntegerField(
+        null=optional,
+        blank=optional,
+        validators=[MinValueValidator(MIN_SCORE), MaxValueValidator(MAX_SCORE)],
+        help_text=help_text,
+    )
+
+
+def score_in_range(name: str, *, optional: bool) -> models.CheckConstraint:
+    """The database's own 1-to-5 check, so a write that skips the serializer is refused too."""
+    condition = models.Q(**{f"{name}__gte": MIN_SCORE, f"{name}__lte": MAX_SCORE})
+    if optional:
+        condition |= models.Q(**{f"{name}__isnull": True})
+    return models.CheckConstraint(condition=condition, name=f"review_{name}_range")
+
+
+class Review(models.Model):
+    """One student's review of one study spot.
+
+    At most one per author and spot, enforced by the database so that two
+    requests racing to create the same review cannot both succeed.
+    """
+
+    spot = models.ForeignKey(
+        StudySpot,
+        on_delete=models.CASCADE,
+        related_name="reviews",
+        # The unique constraint and the ordering index both lead with `spot`,
+        # so a separate index on it would only duplicate them.
+        db_index=False,
+    )
+    author = models.ForeignKey("accounts.Account", on_delete=models.CASCADE, related_name="reviews")
+
+    rating = score_field("Overall score, 1 to 5; 5 is best.", optional=False)
+    noise = score_field("How quiet it is, 1 to 5; 5 is very quiet.", optional=True)
+    wifi = score_field("How good the Wi-Fi is, 1 to 5; 5 is best.", optional=True)
+    seating = score_field("How easy it is to find a seat, 1 to 5; 5 is best.", optional=True)
+    outlets = score_field(
+        "How easy it is to find a power outlet, 1 to 5; 5 is best.", optional=True
+    )
+    body = models.TextField(blank=True, default="", max_length=MAX_REVIEW_BODY)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=["spot", "author"], name="review_one_per_author_spot"),
+            score_in_range("rating", optional=False),
+            *(score_in_range(name, optional=True) for name in OPTIONAL_SCORES),
+        ]
+        indexes = [
+            # Matches the order GET /spots/{id}/reviews pages in.
+            models.Index(fields=["spot", "-created_at", "-id"], name="review_spot_recent_idx"),
+        ]
+
+    def __str__(self) -> str:
+        return f"Review {self.pk} of {self.spot_id}"

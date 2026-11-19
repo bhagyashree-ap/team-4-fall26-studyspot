@@ -99,3 +99,37 @@ class StudentProfile(models.Model):
 
     def __str__(self) -> str:
         return f"Student profile for {self.account.username}"
+
+
+class Favourite(models.Model):
+    """One study spot a student has saved.
+
+    Private to the account that made it: nothing exposes another person's
+    saves, which is why this is a plain row rather than a field on StudySpot.
+
+    Restored after a merge dropped it. The class had been written on the
+    favourites branch and `0002_favourite` creates its table, but the merge of
+    develop into that branch resolved this file by taking develop's side, so
+    the model vanished while its migration, its views in `favourites.py` and
+    its tests all stayed. Keep the fields here in step with that migration.
+    """
+
+    account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name="favourites")
+    spot = models.ForeignKey("spots.StudySpot", on_delete=models.CASCADE, related_name="favourites")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["account", "spot"], name="favourite_account_spot_unique"
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["account", "-created_at", "-id"], name="favourite_account_order_idx"
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.account_id}: {self.spot_id}"

@@ -5,12 +5,12 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import Count, Expression, F, IntegerField, Q, QuerySet, Value
 from django.db.models.functions import ASin, Cast, Cos, Least, Power, Radians, Round, Sin, Sqrt
 from rest_framework import status
-from rest_framework.exceptions import NotFound, PermissionDenied
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.exceptions import APIException, NotFound, PermissionDenied
+from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
 from rest_framework.request import Request
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -18,12 +18,15 @@ from rest_framework.views import APIView
 from accounts.authentication import Auth0Authentication
 from accounts.models import Account, AccountType
 
-from .models import StudySpot
+from .models import Review, StudySpot
 from .search import expanded_words, search
 from .serializers import (
     Coordinates,
     ListingSerializer,
     NearbySpotSerializer,
+    ReviewQuerySerializer,
+    ReviewSerializer,
+    ReviewWriteSerializer,
     SpotFacetsQuerySerializer,
     SpotQuerySerializer,
     SpotSearchQuerySerializer,
@@ -383,3 +386,94 @@ class ListingDetailView(APIView):
         # Lock before Django collects cascading favourites so it sees preceding saves.
         owned_listing(request, spot_id, for_update=True).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class ReviewConflict(APIException):
+    status_code = status.HTTP_409_CONFLICT
+    default_detail = "You have already reviewed this study spot."
+    default_code = "conflict"
+
+
+#: The constraint that makes a second review by the same author a conflict.
+ONE_REVIEW_CONSTRAINT = "review_one_per_author_spot"
+
+
+def student_account(request: Request) -> Account:
+    """The caller's account, provided it is a student account."""
+    account: Account = request.user.account
+    if account.account_type != AccountType.STUDENT:
+        raise PermissionDenied("Only a student account can review study spots.")
+    return account
+
+
+def violated_constraint(error: IntegrityError) -> str | None:
+    """The name of the constraint Postgres reports ``error`` for, if any."""
+    diagnostics = getattr(error.__cause__, "diag", None)
+    return getattr(diagnostics, "constraint_name", None)
+
+
+class SpotReviewsView(APIView):
+    """``GET`` and ``POST /spots/{id}/reviews`` -- a spot's reviews.
+
+    Reading is public. Writing takes a signed-in student account, and each
+    student reviews a spot at most once.
+    """
+
+    authentication_classes = [Auth0Authentication]
+
+    def get_permissions(self) -> list[BasePermission]:
+        if self.request.method == "POST":
+            return [IsAuthenticated()]
+        return [AllowAny()]
+
+    def get(self, request: Request, spot_id: str) -> Response:
+        query = ReviewQuerySerializer(data=request.query_params)
+        query.is_valid(raise_exception=True)
+        limit: int = query.validated_data["limit"]
+        offset: int = query.validated_data["offset"]
+
+        if not StudySpot.objects.filter(pk=spot_id).exists():
+            raise NotFound(f"No study spot has the identifier {spot_id!r}.")
+
+        # Newest first; the id breaks ties between reviews made in the same
+        # instant, so paging never repeats or skips one.
+        reviews = (
+            Review.objects.filter(spot_id=spot_id)
+            .select_related("author")
+            .order_by("-created_at", "-id")
+        )
+        total = reviews.count()
+        items = ReviewSerializer(reviews[offset : offset + limit], many=True).data
+        return Response(
+            {
+                "items": items,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "count": len(items),
+                    "total": total,
+                    "has_more": offset + len(items) < total,
+                },
+            }
+        )
+
+    def post(self, request: Request, spot_id: str) -> Response:
+        account = student_account(request)
+        try:
+            with transaction.atomic():
+                try:
+                    # Locked as favourites lock it, so a listing deleted at the
+                    # same moment either cascades this review or answers 404.
+                    spot = StudySpot.objects.select_for_update().get(pk=spot_id)
+                except StudySpot.DoesNotExist:
+                    raise NotFound(f"No study spot has the identifier {spot_id!r}.") from None
+                serializer = ReviewWriteSerializer(data=request.data)
+                serializer.is_valid(raise_exception=True)
+                # No existence check first: the unique constraint decides, which
+                # also settles two requests submitted at once.
+                review = serializer.save(spot=spot, author=account)
+        except IntegrityError as error:
+            if violated_constraint(error) == ONE_REVIEW_CONSTRAINT:
+                raise ReviewConflict() from error
+            raise
+        return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)
