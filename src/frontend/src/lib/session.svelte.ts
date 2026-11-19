@@ -1,17 +1,5 @@
-/**
- * Who is logged in, shared by every page.
- *
- * Auth0 does the logging in: its hosted page takes the email, the password, the
- * sign-up and the password reset, and hands back an access token. This module
- * keeps that token's account in reactive state so the header and the account
- * page agree, and is the one place that talks to the Auth0 SDK.
- *
- * Pages are prerendered, so none of this runs until the browser does. The
- * layout calls `start()` on mount; everything rendered before then sees
- * `status === 'loading'`.
- */
-
-import type { Auth0Client } from '@auth0/auth0-spa-js';
+import { SvelteURL } from 'svelte/reactivity';
+import { Auth0Client } from '@auth0/auth0-spa-js';
 import { ApiError, type Fetcher } from './api';
 import {
 	checkUsername,
@@ -23,8 +11,7 @@ import {
 import type { Account, AuthConfig, CompleteSignUp, UsernameCheck } from './contract';
 
 export type SessionStatus = 'loading' | 'disabled' | 'signed-out' | 'signed-in' | 'error';
-
-/** The part of the Auth0 client this module uses, so tests can stand in for it. */
+export type SessionScope = { subject: string; generation: number };
 export type AuthClient = Pick<
 	Auth0Client,
 	| 'checkSession'
@@ -35,26 +22,20 @@ export type AuthClient = Pick<
 	| 'handleRedirectCallback'
 	| 'logout'
 >;
-
 type Enabled = Extract<AuthConfig, { enabled: true }>;
-
-/** Where the sign-up choice waits while the browser is away at Auth0. */
 export type PendingStore = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
-
 export type SessionDependencies = {
 	fetcher?: Fetcher;
 	createClient?: (config: Enabled) => Promise<AuthClient>;
-	/** `null` keeps nothing between page loads. */
 	storage?: PendingStore | null;
+	subscribeIdentity?: (listener: () => void) => void;
 };
-
+type Continuation = { returnTo: string; subject: string | null };
 const PENDING_KEY = 'studyspot:pending-sign-up';
+const CONTINUATION_KEY = 'studyspot:account-continuation';
+export const IDENTITY_KEY = 'studyspot:identity';
+export const CALLBACK_PATH = '/callback';
 
-/**
- * localStorage, or nothing where it is unavailable: during prerendering, in
- * a private window that refuses it, or with site data blocked. Losing the
- * pending choice only means asking for it again.
- */
 function browserStorage(): PendingStore | null {
 	try {
 		return typeof window === 'undefined' ? null : window.localStorage;
@@ -73,19 +54,8 @@ function isCompleteSignUp(value: unknown): value is CompleteSignUp {
 	);
 }
 
-/** Where Auth0 sends the browser back to, which must be listed in its settings. */
-export const CALLBACK_PATH = '/callback';
-
-/**
- * The real client, loaded only when accounts are switched on.
- *
- * The token cache lives in localStorage with refresh tokens rather than in
- * memory with a hidden iframe: the iframe needs Auth0's third-party cookie,
- * which Safari and Firefox block, and without it every reload would log the
- * person out.
- */
+// Refresh tokens avoid the third-party iframe cookies Safari and Firefox block.
 async function auth0Client(config: Enabled): Promise<AuthClient> {
-	const { Auth0Client } = await import('@auth0/auth0-spa-js');
 	return new Auth0Client({
 		domain: config.domain,
 		clientId: config.client_id,
@@ -98,35 +68,63 @@ async function auth0Client(config: Enabled): Promise<AuthClient> {
 	});
 }
 
-/**
- * A path on this site to come back to, or the homepage.
- *
- * `returnTo` travels through Auth0 and back, so it is checked on the way in:
- * `//elsewhere.example` is a path to a browser and a different site to a person.
- */
 export function safeReturnTo(value: unknown): string {
-	if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return '/';
-	return value;
+	if (
+		typeof value !== 'string' ||
+		!value.startsWith('/') ||
+		value.startsWith('//') ||
+		value.includes('\\')
+	)
+		return '/';
+	for (let index = 0; index < value.length; index += 1) {
+		const code = value.charCodeAt(index);
+		if (code <= 32 || code === 127) return '/';
+	}
+	try {
+		const url = new SvelteURL(value, 'https://studyspot.invalid');
+		if (url.origin !== 'https://studyspot.invalid') return '/';
+		const path = url.pathname + url.search + url.hash;
+		return path.startsWith('//') ? '/' : path;
+	} catch {
+		return '/';
+	}
+}
+
+// This scopes browser state only. The API verifies and authorizes the token.
+function accessSubject(token: string): string | null {
+	try {
+		const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+		return typeof payload.sub === 'string' && payload.sub.length > 0 ? payload.sub : null;
+	} catch {
+		return null;
+	}
+}
+
+function signalSubject(value: string | null): string | null {
+	try {
+		const subject: unknown = JSON.parse(value ?? 'null')?.subject;
+		return typeof subject === 'string' && subject ? subject : null;
+	} catch {
+		return null;
+	}
+}
+
+function changed(): ApiError {
+	return new ApiError('session_changed', 'Your session changed. Please try again.', 401);
 }
 
 function describe(error: unknown): string {
 	if (error instanceof ApiError) {
-		if (error.code === 'network_error') {
+		if (error.code === 'network_error')
 			return 'Could not reach StudySpot. Check your connection and try again.';
-		}
 		return error.message;
 	}
-	// Auth0 explains a refused log-in in `error_description`, as in "Service not
-	// found: https://api.example" for a misconfigured API. Hiding that behind a
-	// generic message leaves nobody able to tell what to fix.
 	const description = (error as { error_description?: unknown } | null)?.error_description;
-	if (typeof description === 'string' && description) {
+	if (typeof description === 'string' && description)
 		return `Auth0 could not log you in: ${description}`;
-	}
 	return 'Something went wrong while logging in.';
 }
 
-/** Auth0 reports a session that has ended by refusing a token with these. */
 function isLoggedOut(error: unknown): boolean {
 	if (error instanceof ApiError) return error.status === 401;
 	const code = (error as { error?: unknown } | null)?.error;
@@ -137,227 +135,384 @@ export class Session {
 	status = $state<SessionStatus>('loading');
 	account = $state<Account | null>(null);
 	error = $state('');
-
-	/**
-	 * What was chosen on the sign-up page, kept until the account exists to
-	 * apply it to. The email has to be verified first, which can take a day.
-	 */
+	subject = $state<string | null>(null);
+	generation = $state(0);
 	pending = $state<CompleteSignUp | null>(null);
-
-	/** Why applying `pending` was refused, for the form to show. */
 	pendingError = $state<ApiError | null>(null);
-
 	#fetcher: Fetcher;
 	#createClient: (config: Enabled) => Promise<AuthClient>;
 	#storage: PendingStore | null;
+	#subscribeIdentity: (listener: () => void) => void;
 	#client: AuthClient | null = null;
 	#started: Promise<void> | null = null;
+	#observedSignal: string | null;
+	#continuation: Continuation | null = null;
+	#pendingSubject: string | null = null;
 
 	constructor(dependencies: SessionDependencies = {}) {
 		this.#fetcher = dependencies.fetcher ?? ((...args) => globalThis.fetch(...args));
 		this.#createClient = dependencies.createClient ?? auth0Client;
 		this.#storage = dependencies.storage === undefined ? browserStorage() : dependencies.storage;
-		this.pending = this.#readPending();
+		this.#subscribeIdentity =
+			dependencies.subscribeIdentity ??
+			((listener) => {
+				if (dependencies.storage !== undefined || typeof window === 'undefined') return;
+				window.addEventListener('storage', (event) => {
+					if (event.key === IDENTITY_KEY || event.key === null) listener();
+				});
+			});
+		this.#observedSignal = this.#read(IDENTITY_KEY);
+		try {
+			const saved = JSON.parse(this.#read(PENDING_KEY) ?? 'null');
+			if (isCompleteSignUp(saved?.choice)) {
+				this.pending = saved.choice;
+				this.#pendingSubject = typeof saved.subject === 'string' ? saved.subject : null;
+			}
+			const continuation = JSON.parse(this.#read(CONTINUATION_KEY) ?? 'null');
+			if (
+				continuation &&
+				safeReturnTo(continuation.returnTo) === continuation.returnTo &&
+				(continuation.subject === null || typeof continuation.subject === 'string')
+			) {
+				this.#continuation = continuation;
+			}
+		} catch {
+			this.#write(PENDING_KEY, null);
+			this.#write(CONTINUATION_KEY, null);
+		}
 	}
 
-	/**
-	 * Find out who is logged in. Safe to call more than once; only the first
-	 * call does anything.
-	 *
-	 * `callback` is set on the page Auth0 redirects back to, which finishes the
-	 * log-in itself with `finishLogIn()` rather than asking about a session that
-	 * does not exist yet.
-	 */
+	get scope(): SessionScope | null {
+		return this.status === 'signed-in' && this.subject
+			? { subject: this.subject, generation: this.generation }
+			: null;
+	}
+
+	isCurrent(scope: SessionScope): boolean {
+		this.#syncIdentity();
+		return (
+			this.status === 'signed-in' &&
+			this.subject === scope.subject &&
+			this.generation === scope.generation
+		);
+	}
+
 	start({ callback = false }: { callback?: boolean } = {}): Promise<void> {
-		this.#started ??= this.#start(callback);
+		if (!this.#started) {
+			this.#subscribeIdentity(() => this.#syncIdentity());
+			this.#started = this.#start(callback);
+		}
 		return this.#started;
 	}
 
 	async #start(callback: boolean): Promise<void> {
+		let generation = this.generation;
 		try {
 			const config = await fetchAuthConfig(this.#fetcher);
 			if (!config.enabled) {
 				this.status = 'disabled';
 				return;
 			}
-
-			this.#client = await this.#createClient(config);
+			const client = await this.#createClient(config);
+			this.#client = client;
+			generation = this.generation;
 			if (callback) return;
-
-			// Renews the cached tokens if they have lapsed. It never throws: no
-			// session is an answer, not an error.
-			await this.#client.checkSession();
-			if (await this.#client.isAuthenticated()) {
-				await this.#loadAccount();
-			} else {
+			if (this.#observedSignal !== null && signalSubject(this.#observedSignal) === null) {
 				this.status = 'signed-out';
+				return;
 			}
+			await client.checkSession();
+			if (!this.#sameGeneration(generation)) return;
+			const authenticated = await client.isAuthenticated();
+			if (!this.#sameGeneration(generation)) return;
+			if (authenticated) await this.#loadAccount(generation);
+			else this.status = 'signed-out';
 		} catch (error) {
-			this.#fail(error);
+			if (!this.#client || this.#sameGeneration(generation)) this.#fail(error);
 		}
 	}
 
-	/**
-	 * Complete the redirect back from Auth0, and say where to go next.
-	 *
-	 * A new account goes to the account page to choose student or business;
-	 * anyone else returns to wherever they started logging in from.
-	 */
 	async finishLogIn(): Promise<string> {
 		await this.start({ callback: true });
 		const client = this.#client;
 		if (!client) return '/';
-
+		this.#invalidate('loading');
+		this.#publishIdentity(null);
+		const generation = this.generation;
 		try {
 			const { appState } = await client.handleRedirectCallback<{ returnTo?: string }>();
-			await this.#loadAccount();
-			if (this.account && this.account.account_type === null) return '/account';
-			return safeReturnTo(appState?.returnTo);
+			if (!this.#sameGeneration(generation)) return '/';
+			if (!this.#continuation) this.rememberReturnTo(appState?.returnTo ?? '/');
+			await this.#loadAccount(generation, false, true);
+			if (!this.#sameGeneration(generation) || !this.account) return '/account';
+			if (!this.account.email_verified || this.account.account_type === null) return '/account';
+			return this.consumeReturnTo() ?? '/';
 		} catch (error) {
-			this.#fail(error);
+			if (this.#sameGeneration(generation)) this.#fail(error);
 			return '/account';
 		}
 	}
 
-	/** Go to Auth0's log-in page, coming back to `returnTo` afterwards. */
+	rememberReturnTo(returnTo: string): void {
+		this.#continuation = { returnTo: safeReturnTo(returnTo), subject: this.subject };
+		this.#write(CONTINUATION_KEY, this.#continuation);
+	}
+
+	consumeReturnTo(): string | null {
+		const continuation = this.#continuation;
+		if (
+			!continuation ||
+			!this.scope ||
+			!this.account?.email_verified ||
+			this.account.account_type === null
+		)
+			return null;
+		this.#continuation = null;
+		this.#write(CONTINUATION_KEY, null);
+		return continuation.subject === this.subject ? continuation.returnTo : null;
+	}
+
 	async logIn(returnTo = '/'): Promise<void> {
+		this.#writePending(null);
+		this.rememberReturnTo(returnTo);
 		await this.#redirect(returnTo, {});
 	}
 
-	/**
-	 * Go to Auth0's sign-up page for the email and password.
-	 *
-	 * `choice` is everything else, from StudySpot's own sign-up page. It is
-	 * kept here and applied as soon as the new account's email is verified, so
-	 * nobody is asked the same question twice.
-	 */
-	async signUp(choice?: CompleteSignUp): Promise<void> {
-		if (choice) this.#writePending(choice);
-		await this.#redirect('/account', { screen_hint: 'signup' });
+	async signUp(choice?: CompleteSignUp, returnTo = '/account'): Promise<void> {
+		this.rememberReturnTo(returnTo);
+		this.#writePending(choice ?? null);
+		await this.#redirect(returnTo, { screen_hint: 'signup' });
 	}
 
 	async logOut(): Promise<void> {
 		const client = this.#client;
-		if (!client) return;
-		this.account = null;
-		this.status = 'signed-out';
-		this.#writePending(null);
-		await client.logout({ logoutParams: { returnTo: window.location.origin } });
+		this.#invalidate('signed-out');
+		this.#clearJourney();
+		this.#publishIdentity(null);
+		if (client) await client.logout({ logoutParams: { returnTo: window.location.origin } });
 	}
 
-	/**
-	 * Reload the account from a brand-new token.
-	 *
-	 * Verifying an email happens in another tab, and the cached token still says
-	 * it is unverified, so this skips the cache to see the change.
-	 */
 	async refresh(): Promise<void> {
+		if (!this.#client || this.status === 'signed-out' || this.status === 'disabled') return;
+		const generation = this.generation;
 		try {
-			await this.#loadAccount(true);
+			await this.#loadAccount(generation, true);
 		} catch (error) {
-			this.#fail(error);
+			if (this.#sameGeneration(generation)) this.#fail(error);
 		}
 	}
 
-	/** Whether a username is free, for the sign-up form to say as it is typed. */
 	checkUsername(username: string): Promise<UsernameCheck> {
 		return checkUsername(username, this.#fetcher);
 	}
 
-	/** Choose student or business. Validation errors are thrown to the form. */
 	async completeSignUp(choice: CompleteSignUp): Promise<Account> {
-		const account = await completeSignUp(await this.#credentials(), choice, this.#fetcher);
+		const scope = this.scope;
+		if (!scope) throw changed();
+		const credentials = await this.credentialsFor(scope);
+		if (!this.isCurrent(scope)) throw changed();
+		const account = await completeSignUp(credentials, choice, this.#fetcher);
+		if (!this.isCurrent(scope)) throw changed();
 		this.account = account;
 		this.#writePending(null);
 		return account;
 	}
 
 	async #redirect(returnTo: string, authorizationParams: Record<string, string>): Promise<void> {
+		const generation = this.generation;
 		await this.start();
-		if (!this.#client) return;
+		if (!this.#sameGeneration(generation) || !this.#client) return;
 		await this.#client.loginWithRedirect({
 			appState: { returnTo: safeReturnTo(returnTo) },
 			authorizationParams
 		});
 	}
 
-	async #credentials(fresh = false): Promise<Credentials> {
+	async credentialsFor(scope: SessionScope): Promise<Credentials> {
+		if (!this.isCurrent(scope)) throw changed();
+		try {
+			return await this.#credentials(scope.generation, false, scope.subject);
+		} catch (error) {
+			if (isLoggedOut(error)) this.rejectCredentials(scope);
+			throw error;
+		}
+	}
+
+	rejectCredentials(scope: SessionScope): void {
+		if (!this.isCurrent(scope)) return;
+		this.#invalidate('signed-out');
+		this.#clearJourney();
+		this.#publishIdentity(null);
+	}
+
+	communityCredentials(): Promise<Credentials> | null {
+		const scope = this.scope;
+		return scope ? this.credentialsFor(scope) : null;
+	}
+
+	async #credentials(
+		generation: number,
+		fresh = false,
+		expected: string | null = this.subject
+	): Promise<Credentials> {
+		if (!this.#sameGeneration(generation)) throw changed();
 		const access = fresh
 			? await this.#client?.getTokenSilently({ cacheMode: 'off' })
 			: await this.#client?.getTokenSilently();
-		// The SDK's types allow for no token at all; that is being logged out.
-		if (!access) throw new ApiError('unauthorized', 'You are not logged in.', 401);
-		// Renewed alongside the access token, so after `fresh` it is the new one.
+		if (!this.#sameGeneration(generation)) throw changed();
+		const subject = access ? accessSubject(access) : null;
+		if (!access || !subject) {
+			this.#invalidate('signed-out');
+			this.#clearJourney();
+			this.#publishIdentity(null);
+			throw new ApiError('unauthorized', 'You are not logged in.', 401);
+		}
+		if (expected && expected !== subject) {
+			this.#invalidate('signed-out');
+			this.#clearJourney();
+			this.#publishIdentity(null);
+			throw changed();
+		}
 		const id = (await this.#client?.getIdTokenClaims())?.__raw;
+		if (!this.#sameGeneration(generation)) throw changed();
+		if (!this.subject) {
+			this.subject = subject;
+			this.#bindJourney(subject);
+			this.#publishIdentity(subject);
+		}
 		return { access, id };
 	}
 
-	/** Credentials for other account-backed API features. Public requests need none. */
-	communityCredentials(): Promise<Credentials> | null {
-		return this.status === 'signed-in' ? this.#credentials() : null;
-	}
-
-	async #loadAccount(fresh = false): Promise<void> {
+	async #loadAccount(generation: number, fresh = false, callback = false): Promise<void> {
 		try {
-			this.account = await fetchAccount(await this.#credentials(fresh), this.#fetcher);
+			const expected = callback ? null : (this.subject ?? signalSubject(this.#observedSignal));
+			const credentials = await this.#credentials(generation, fresh, expected);
+			if (!this.#sameGeneration(generation)) return;
+			const subject = this.subject;
+			const account = await fetchAccount(credentials, this.#fetcher);
+			if (!this.#sameGeneration(generation) || this.subject !== subject) return;
+			this.account = account;
 			this.status = 'signed-in';
 			this.error = '';
+			await this.#applyPending();
 		} catch (error) {
+			if (!this.#sameGeneration(generation)) return;
 			if (!isLoggedOut(error)) throw error;
-			this.account = null;
-			this.status = 'signed-out';
-			return;
+			this.#invalidate('signed-out');
+			this.#clearJourney();
+			this.#publishIdentity(null);
 		}
-		await this.#applyPending();
 	}
 
-	/** Finish sign-up with the pending choice, once the account can take it. */
 	async #applyPending(): Promise<void> {
 		const account = this.account;
 		if (!account || !this.pending) return;
-		if (account.account_type !== null) {
-			// Finished some other way, as in another tab.
+		if (account.account_type !== null || this.#pendingSubject !== this.subject) {
 			this.#writePending(null);
 			return;
 		}
 		if (!account.email_verified) return;
-
+		const scope = this.scope;
 		try {
 			await this.completeSignUp(this.pending);
-			this.pendingError = null;
 		} catch (error) {
-			// Left for the form, filled in with the same values: a username can
-			// be taken in the time it took to verify an email.
+			if (!scope || !this.isCurrent(scope)) return;
 			if (!(error instanceof ApiError) || isLoggedOut(error)) throw error;
 			this.pendingError = error;
 		}
 	}
 
-	#readPending(): CompleteSignUp | null {
+	#bindJourney(subject: string): void {
+		if (this.#continuation) {
+			if (this.#continuation.subject && this.#continuation.subject !== subject) {
+				this.#continuation = null;
+			} else this.#continuation = { ...this.#continuation, subject };
+			this.#write(CONTINUATION_KEY, this.#continuation);
+		}
+		if (this.pending) {
+			if (this.#pendingSubject && this.#pendingSubject !== subject) this.#writePending(null);
+			else this.#writePending(this.pending, subject);
+		}
+	}
+
+	#writePending(choice: CompleteSignUp | null, subject = this.subject): void {
+		this.pending = choice;
+		this.#pendingSubject = choice ? subject : null;
+		this.pendingError = null;
+		this.#write(PENDING_KEY, choice ? { choice, subject } : null);
+	}
+
+	#clearJourney(): void {
+		this.#writePending(null);
+		this.#continuation = null;
+		this.#write(CONTINUATION_KEY, null);
+	}
+
+	#invalidate(status: SessionStatus): void {
+		this.generation += 1;
+		this.subject = null;
+		this.account = null;
+		this.error = '';
+		this.status = status;
+	}
+
+	#sameGeneration(generation: number): boolean {
+		this.#syncIdentity();
+		return this.generation === generation;
+	}
+
+	#syncIdentity(): void {
+		if (!this.#storage) return;
+		let signal: string | null;
 		try {
-			const value: unknown = JSON.parse(this.#storage?.getItem(PENDING_KEY) ?? 'null');
-			return isCompleteSignUp(value) ? value : null;
+			signal = this.#storage.getItem(IDENTITY_KEY);
+		} catch {
+			return;
+		}
+		if (signal === this.#observedSignal) return;
+		this.#observedSignal = signal;
+		if (!this.#client) return;
+		const subject = signalSubject(signal);
+		this.#invalidate(subject ? 'loading' : 'signed-out');
+		this.pending = null;
+		this.pendingError = null;
+		this.#pendingSubject = null;
+		this.#continuation = null;
+		if (subject && this.#client) void this.refresh();
+	}
+
+	#publishIdentity(subject: string | null): void {
+		if (subject && signalSubject(this.#observedSignal) === subject) return;
+		this.#observedSignal = JSON.stringify({ subject, nonce: Math.random().toString(36).slice(2) });
+		try {
+			this.#storage?.setItem(IDENTITY_KEY, this.#observedSignal);
+		} catch {
+			this.#storage = null;
+		}
+	}
+
+	#read(key: string): string | null {
+		try {
+			return this.#storage?.getItem(key) ?? null;
 		} catch {
 			return null;
 		}
 	}
 
-	#writePending(choice: CompleteSignUp | null): void {
-		this.pending = choice;
-		if (!choice) this.pendingError = null;
+	#write(key: string, value: unknown): void {
 		try {
-			if (choice) this.#storage?.setItem(PENDING_KEY, JSON.stringify(choice));
-			else this.#storage?.removeItem(PENDING_KEY);
+			if (value === null) this.#storage?.removeItem(key);
+			else this.#storage?.setItem(key, JSON.stringify(value));
 		} catch {
-			// Storage refused: the choice lives only as long as this page.
+			// Browsers may deny storage while the in-memory session remains usable.
 		}
 	}
 
 	#fail(error: unknown): void {
+		this.account = null;
 		this.error = describe(error);
 		this.status = 'error';
 	}
 }
 
-/** The session every page shares. */
 export const session = new Session();

@@ -53,13 +53,13 @@ The Postgres data directory uses a named volume. Normal shutdown preserves it:
 just shutdown
 ```
 
-To deliberately remove containers and local data:
+Removing local data permanently deletes accounts and favourites unless you have a backup. To deliberately remove containers and local data:
 
 ```shell
 just clean
 ```
 
-The clean operation cannot be undone unless the data was backed up. It is safe here because every record can be rebuilt with `just migrate` and `just load-data`.
+`just migrate` and `just load-data` recreate the schema and public study spots, not accounts or favourites. Use disposable data or follow [Backup and consistent restore](database.md#backup-and-consistent-restore) before cleaning a database you need to keep.
 
 ## Useful diagnostics
 

@@ -2,6 +2,8 @@
 	import { resolve } from '$app/paths';
 	import type { StudySpot } from '$lib/contract';
 	import NearbyMap from '$lib/NearbyMap.svelte';
+	import FavouriteButton from '$lib/FavouriteButton.svelte';
+	import SiteHeader from '$lib/SiteHeader.svelte';
 	import { showsCampus } from '$lib/campus';
 	import { mapsUrl } from '$lib/maps';
 	import { orderByTrunk, routeColour, routeTextColour, STEP_FREE, walkMinutes } from '$lib/subway';
@@ -57,15 +59,7 @@
 </svelte:head>
 
 <div class="page">
-	<header>
-		<a class="brand" href={resolve('/')} aria-label="StudySpot home">
-			<svg viewBox="0 0 32 32" aria-hidden="true">
-				<path d="M7 7.5h18v17H7z"></path>
-				<path d="M11 12h10M11 16h10M11 20h6"></path>
-			</svg>
-			<span>StudySpot</span>
-		</a>
-	</header>
+	<SiteHeader />
 
 	<main>
 		<a class="back" href={resolve('/')}>← All study spots</a>
@@ -74,6 +68,7 @@
 			<p class="eyebrow">{readableCategory(spot.category)}</p>
 			<h1>{spot.name}</h1>
 			<p class="where">{place(spot)}</p>
+			<FavouriteButton {spot} />
 
 			{#if spot.no_purchase_needed || spot.free_public_wifi}
 				<p class="badges">
@@ -262,37 +257,9 @@
 		min-height: 100vh;
 		padding: 0 24px 64px;
 	}
-
-	header,
 	main {
 		width: min(760px, 100%);
 		margin: 0 auto;
-	}
-
-	header {
-		display: flex;
-		align-items: center;
-		height: 76px;
-	}
-
-	.brand {
-		display: inline-flex;
-		align-items: center;
-		gap: 9px;
-		color: var(--color-brand);
-		font-size: 20px;
-		font-weight: 750;
-		letter-spacing: -0.04em;
-	}
-
-	.brand svg {
-		width: 30px;
-		height: 30px;
-		fill: none;
-		stroke: currentColor;
-		stroke-linecap: round;
-		stroke-linejoin: round;
-		stroke-width: 2;
 	}
 
 	.back {

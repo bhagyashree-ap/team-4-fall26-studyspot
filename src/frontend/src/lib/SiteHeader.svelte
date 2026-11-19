@@ -24,7 +24,6 @@
 </script>
 
 {#snippet destinations()}
-	<a class="nav-link" href={resolve('/')}>Explore</a>
 	<a class="nav-link" data-sveltekit-reload href={resolve('/communities')}>Communities</a>
 	<a class="nav-link" href={resolve('/board')}>Board</a>
 	{#if onMap}
@@ -48,6 +47,9 @@
 			-->
 		<a class="nav-link" href="{resolve('/')}?view=map">Map</a>
 	{/if}
+	{#if session.status === 'signed-in' && session.account?.account_type === 'student'}
+		<a class="nav-link" href={resolve('/people')}>People</a>
+	{/if}
 	<!--
 			Nothing until the session is known, so a prerendered "Log in" never
 			flashes at someone who is already logged in. With accounts switched
@@ -62,7 +64,7 @@
 		</a>
 	{:else if session.status === 'signed-out'}
 		<button class="nav-link" type="button" onclick={() => session.logIn(here)}>Log in</button>
-		<a class="sign-in" href={resolve('/signup')}>Sign up</a>
+		<a class="sign-in" href={resolve(`/signup?returnTo=${encodeURIComponent(here)}`)}>Sign up</a>
 	{/if}
 {/snippet}
 

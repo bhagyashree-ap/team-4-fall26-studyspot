@@ -19,6 +19,8 @@ The study-spot definition exists once, as a Django model in `src/backend/spots/m
 
 What the model deliberately does not own is the HTTP layer's own concerns. Paging and query validation live in serializers, because the page size is a property of the route rather than of a study spot.
 
+`accounts.Favourite` stores private relationships between completed student accounts and study spots. The public study-spot contract contains no saved state. Authenticated favourites routes resolve the owner from the authenticated account, and the loader preserves relationships for surviving spot IDs. Unlike the public snapshot, accounts and favourites require backups.
+
 ## Why four containers locally?
 
 Each service has one lifecycle:
@@ -38,7 +40,7 @@ Postgres being a local container is itself a decision. The previous implementati
 |---|---|---|
 | AWS | S3 behind CloudFront, Lambda behind CloudFront `/api/*` | RDS Postgres, private subnets |
 
-One revision, one deployment, no shared state. The application holds nothing between requests and opens a database connection per request, which is what a serverless function needs and what a development server does not mind. The frontend is prerendered to a set of files for S3, so the deployed site needs no server of its own.
+The API keeps no in-process state between requests and opens a database connection per request. Postgres stores persistent accounts and private favourites as well as public study spots. The frontend is prerendered to files for S3. Its `/favourites` shell contains no personal data and loads the current account's list through authenticated API requests.
 
 See [Deployment](deployment.md) for the stack and how it is applied.
 

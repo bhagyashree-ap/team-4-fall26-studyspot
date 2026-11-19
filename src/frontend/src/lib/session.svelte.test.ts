@@ -10,6 +10,7 @@ import type { Account } from './contract';
 import { Session, safeReturnTo, type AuthClient, type PendingStore } from './session.svelte';
 
 const CONFIG = { enabled: true, domain: 'x.auth0.com', client_id: 'spa', audience: 'api' };
+const TOKEN = `header.${btoa(JSON.stringify({ sub: 'auth0|ada' }))}.signature`;
 
 const ACCOUNT: Account = {
 	email: 'ada@nyu.edu',
@@ -65,7 +66,7 @@ function setup({
 		isAuthenticated: async () => authenticated,
 		getTokenSilently: async (argument?: unknown) => {
 			log.push({ method: 'getTokenSilently', argument });
-			return 'token';
+			return TOKEN;
 		},
 		getIdTokenClaims: async () => ({ __raw: 'id-token' }),
 		loginWithRedirect: async (argument?: unknown) =>
@@ -115,7 +116,7 @@ describe('start', () => {
 
 		expect(session.status).toBe('signed-in');
 		expect(session.account).toEqual(ACCOUNT);
-		expect(await session.communityCredentials()).toEqual({ access: 'token', id: 'id-token' });
+		expect(await session.communityCredentials()).toEqual({ access: TOKEN, id: 'id-token' });
 	});
 
 	it('only starts once', async () => {
@@ -256,7 +257,10 @@ describe('the sign-up choice', () => {
 
 	it('finishes sign-up by itself once the email is verified', async () => {
 		const storage = memoryStorage();
-		storage.setItem('studyspot:pending-sign-up', JSON.stringify(CHOICE));
+		storage.setItem(
+			'studyspot:pending-sign-up',
+			JSON.stringify({ choice: CHOICE, subject: 'auth0|ada' })
+		);
 		const { session, posted } = setup({ account: NEW, storage });
 
 		await session.start();
@@ -264,12 +268,15 @@ describe('the sign-up choice', () => {
 		expect(posted).toEqual([CHOICE]);
 		expect(session.account?.account_type).toBe('student');
 		expect(session.pending).toBeNull();
-		expect(storage.items.size).toBe(0);
+		expect(storage.getItem('studyspot:pending-sign-up')).toBeNull();
 	});
 
 	it('waits while the email is unverified', async () => {
 		const storage = memoryStorage();
-		storage.setItem('studyspot:pending-sign-up', JSON.stringify(CHOICE));
+		storage.setItem(
+			'studyspot:pending-sign-up',
+			JSON.stringify({ choice: CHOICE, subject: 'auth0|ada' })
+		);
 		const { session, posted } = setup({ account: { ...NEW, email_verified: false }, storage });
 
 		await session.start();
@@ -280,7 +287,10 @@ describe('the sign-up choice', () => {
 
 	it('keeps the choice and the reason when the API refuses it', async () => {
 		const storage = memoryStorage();
-		storage.setItem('studyspot:pending-sign-up', JSON.stringify(CHOICE));
+		storage.setItem(
+			'studyspot:pending-sign-up',
+			JSON.stringify({ choice: CHOICE, subject: 'auth0|ada' })
+		);
 		const { session } = setup({
 			account: NEW,
 			storage,
@@ -312,14 +322,17 @@ describe('the sign-up choice', () => {
 
 	it('is forgotten on log-out', async () => {
 		const storage = memoryStorage();
-		storage.setItem('studyspot:pending-sign-up', JSON.stringify(CHOICE));
+		storage.setItem(
+			'studyspot:pending-sign-up',
+			JSON.stringify({ choice: CHOICE, subject: 'auth0|ada' })
+		);
 		const { session } = setup({ account: { ...NEW, email_verified: false }, storage });
 		await session.start();
 
 		await session.logOut();
 
 		expect(session.pending).toBeNull();
-		expect(storage.items.size).toBe(0);
+		expect(storage.getItem('studyspot:pending-sign-up')).toBeNull();
 	});
 
 	it('ignores anything in storage that is not a choice', () => {

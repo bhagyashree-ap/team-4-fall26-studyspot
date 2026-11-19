@@ -126,7 +126,8 @@ describe('the sign-up page', () => {
 		const client = {
 			checkSession: async () => {},
 			isAuthenticated: async () => true,
-			getTokenSilently: async () => 'token',
+			getTokenSilently: async () =>
+				`header.${btoa(JSON.stringify({ sub: 'auth0|ada' }))}.signature`,
 			getIdTokenClaims: async () => undefined
 		} as unknown as AuthClient;
 		const session = new Session({ fetcher, createClient: async () => client, storage: null });

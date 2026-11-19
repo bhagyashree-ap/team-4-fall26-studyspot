@@ -12,11 +12,13 @@
  */
 
 import { page } from 'vitest/browser';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'vitest-browser-svelte';
 
 import SpotResults from './SpotResults.svelte';
-import type { StudySpot } from './contract';
+import type { Account, NearbySpot, StudySpot } from './contract';
+import { favourites } from './favourites.svelte';
+import { session } from './session.svelte';
 
 const SPOT: StudySpot = {
 	id: 'facdb:bobst',
@@ -117,6 +119,108 @@ describe('the card as a link', () => {
 
 		const hit = topmostAt(maps.element());
 		expect(hit?.closest('a')?.getAttribute('href')).toContain('google.com/maps');
+	});
+});
+
+describe('favourites on result cards', () => {
+	const ACCOUNT: Account = {
+		email: 'ada@nyu.edu',
+		email_verified: true,
+		username: 'ada',
+		account_type: 'student',
+		business_name: '',
+		created_at: '2026-10-27T12:00:00Z'
+	};
+	let previous = {
+		status: session.status,
+		account: session.account,
+		subject: session.subject
+	};
+
+	beforeEach(() => {
+		previous = {
+			status: session.status,
+			account: session.account,
+			subject: session.subject
+		};
+		session.generation += 1;
+		session.subject = 'auth0|card-reader';
+		session.account = ACCOUNT;
+		session.status = 'signed-in';
+		vi.spyOn(session, 'credentialsFor').mockResolvedValue({ access: 'test-token' });
+	});
+
+	afterEach(() => {
+		session.generation += 1;
+		Object.assign(session, previous);
+		vi.restoreAllMocks();
+	});
+
+	it('keeps Save beside the title and clickable above the card link', async () => {
+		session.status = 'signed-out';
+		session.subject = null;
+		session.account = null;
+		render(SpotResults, { spots: [SPOT], total: 1, hasMore: false });
+
+		const save = page.getByRole('button', { name: 'Save', exact: true });
+		await expect.element(save).toBeVisible();
+		const titleBox = page.getByRole('link', { name: SPOT.name }).element().getBoundingClientRect();
+		const saveBox = save.element().getBoundingClientRect();
+		const mapsBox = page.getByRole('link', { name: /Maps/ }).element().getBoundingClientRect();
+		expect(saveBox.top).toBeLessThan(titleBox.bottom);
+		expect(saveBox.bottom).toBeGreaterThan(titleBox.top);
+		expect(saveBox.bottom).toBeLessThan(mapsBox.top);
+		const hit = document.elementFromPoint(
+			saveBox.left + saveBox.width / 2,
+			saveBox.top + saveBox.height / 2
+		);
+		expect(save.element().contains(hit)).toBe(true);
+
+		await save.click();
+		await expect.element(page.getByText(/without saving automatically/)).toBeVisible();
+		expect(
+			page.getByRole('link', { name: 'Sign up', exact: true }).element().getAttribute('href')
+		).toContain(encodeURIComponent(`/spots/${SPOT.id}`));
+	});
+
+	it('shows one collection error and retries it for every card without saving', async () => {
+		let reads = 0;
+		const fetcher = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+			reads += 1;
+			return new Response(
+				JSON.stringify(
+					reads === 1
+						? { error: { code: 'unavailable', message: 'Favourites unavailable' } }
+						: {
+								items: [],
+								pagination: { offset: 0, limit: 100, count: 0, total: 0, has_more: false }
+							}
+				),
+				{ status: reads === 1 ? 503 : 200, headers: { 'content-type': 'application/json' } }
+			);
+		});
+		const nearby: NearbySpot = { ...SPOT, distance_metres: 437 };
+		const other: StudySpot = { ...SPOT, id: 'facdb:tamiment', name: 'Tamiment Library' };
+		render(SpotResults, {
+			spots: [nearby, other],
+			total: 2,
+			hasMore: false,
+			distanceFrom: 'you'
+		});
+
+		await expect.element(page.getByRole('alert')).toHaveTextContent('Favourites unavailable');
+		expect(document.querySelectorAll('[role="alert"]')).toHaveLength(1);
+		await expect.element(page.getByText('450 m from you')).toBeVisible();
+		await page.getByRole('button', { name: 'Retry loading favourites' }).click();
+
+		await expect.element(page.getByRole('button', { name: 'Save Bobst Library' })).toBeEnabled();
+		await expect.element(page.getByRole('button', { name: 'Save Tamiment Library' })).toBeEnabled();
+		await expect.element(page.getByRole('alert')).not.toBeInTheDocument();
+		await expect
+			.element(page.getByRole('button', { name: 'Retry loading favourites' }))
+			.not.toBeInTheDocument();
+		expect(favourites.saved(SPOT.id)).toBe(false);
+		expect(fetcher.mock.calls.map(([, init]) => init?.method)).toEqual(['GET', 'GET']);
 	});
 });
 
@@ -255,7 +359,7 @@ describe('switching between the list and the map', () => {
 });
 
 describe('the distance on a card', () => {
-	const NEARBY = { ...SPOT, distance_metres: 437 };
+	const NEARBY: NearbySpot = { ...SPOT, distance_metres: 437 };
 
 	it('says how far the place is, and from where, while ordered by distance', async () => {
 		render(SpotResults, { spots: [NEARBY], total: 1, hasMore: false, distanceFrom: 'you' });
@@ -278,6 +382,28 @@ describe('the distance on a card', () => {
 		// A card left over from an earlier ordering still carries its number,
 		// and it is measured from a point no longer in force.
 		render(SpotResults, { spots: [NEARBY], total: 1, hasMore: false });
+
+		await expect.element(page.getByText('Bobst Library')).toBeInTheDocument();
+		await expect.element(page.getByText(/ m from /)).not.toBeInTheDocument();
+	});
+
+	it('omits a distance for a plain spot even when a distance origin is set', async () => {
+		render(SpotResults, { spots: [SPOT], total: 1, hasMore: false, distanceFrom: 'you' });
+
+		await expect.element(page.getByText('Bobst Library')).toBeInTheDocument();
+		await expect.element(page.getByText(/ m from /)).not.toBeInTheDocument();
+	});
+
+	it('removes the old distance when the ordering changes but the spot stays', async () => {
+		const view = await render(SpotResults, {
+			spots: [NEARBY],
+			total: 1,
+			hasMore: false,
+			distanceFrom: 'you'
+		});
+		await expect.element(page.getByText('450 m from you')).toBeInTheDocument();
+
+		await view.rerender({ distanceFrom: undefined });
 
 		await expect.element(page.getByText('Bobst Library')).toBeInTheDocument();
 		await expect.element(page.getByText(/ m from /)).not.toBeInTheDocument();

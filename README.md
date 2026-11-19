@@ -8,12 +8,14 @@ StudySpot is an open-source app for discovering cafés and other third places ac
 
 Public study communities are available at `/communities`, open to anyone without signing in: browse the list, create a group, join and chat as a guest. Owners manage channels and members; members can share channel links, chat, search messages, and start private conversations. Guest ownership and membership are tied to the browser session.
 
+Completed student accounts can save study spots from search results and detail pages, then manage their private list at `/favourites`. Visitors who select Save can log in or sign up and return to the spot, but must select Save again. Business accounts cannot use favourites. See [Accounts](docs/source/accounts.md) for Auth0 setup.
+
 > [!IMPORTANT]
 > StudySpot is deployed and working. `data/spots.json` holds 2,422 real places — 2,158 cafés, 227 public library branches, 21 special libraries, and 16 academic libraries and NYU campus buildings — 429 of them with a free public Wi-Fi hotspot nearby, and 108 cafés with a sidewalk-dining licence. Every one is somewhere a person can go: the city's 126 campus records anchor the "near which campus" label but are not published as spots, because an institution's administrative point is not a room. Search runs entirely in Postgres: full text ranks across name, campus, neighborhood and address, with trigram similarity behind it for misspellings, and it searches as you type. Results filter by borough, type, campus, and Wi-Fi. A spot detail page is the notable gap.
 
 ## How will it work?
 
-StudySpot is a small modular monolith: one application, one versioned public-data snapshot.
+StudySpot is a small modular monolith with one versioned public-data snapshot and persistent user-owned data.
 
 ```text
 Browser -> SvelteKit -> Django REST Framework -> Postgres
@@ -53,7 +55,7 @@ The shared study-spot summary contract is intentionally small:
 
 `university` is proximity and never affiliation or a claim of access. `free_public_wifi` means the city publishes a free hotspot within 25 m; `false` means none is recorded rather than that there is no Wi-Fi, which is why a campus building with credentialled Wi-Fi reads as `false`. `operator` is who runs the place — for a branch, its library system, which nothing else in the record says. `no_purchase_needed` is true where sitting down costs nothing — every library and campus building, no café — and is about money rather than entry. `outdoor_seating` is true when a Dining Out NYC sidewalk licence matches the establishment's name *and* address; `false` means no licence matched rather than that there is nowhere to sit outside, and only cafés can carry it.
 
-Six routes are available alongside `GET /health/live`, none of them with a trailing slash:
+The following routes are available alongside `GET /health/live`, none with a trailing slash:
 
 | Route | Purpose |
 |---|---|
@@ -63,10 +65,12 @@ Six routes are available alongside `GET /health/live`, none of them with a trail
 | `GET /spots/{id}` | One spot |
 | `GET /auth/config` | Which Auth0 tenant the browser logs in with |
 | `GET /account`, `POST /account` | The logged-in person's account, and finishing sign-up |
+| `GET /favourites` | The current student account's private list, newest-saved first, with `limit` and `offset` |
+| `PUT /favourites/{spot_id}`, `DELETE /favourites/{spot_id}` | Idempotent save and removal for the current student account, returning `204` |
 
 See the [HTTP API guide](docs/source/api.md).
 
-Every spot also has its own page at `/spots/{id}`. All 3,772 are prerendered at build time from the committed snapshot, so each is real HTML in S3 rather than a route the browser assembles: the link works in a fresh tab, in a shared message, and to a crawler, with no request on load. The nearby-spots list on each page is computed at build time from the same coordinates the importer uses.
+Every spot also has its own page at `/spots/{id}`. All 3,772 are prerendered at build time from the committed snapshot, so each is real HTML in S3 rather than a route the browser assembles. Public detail content needs no API request on load. Personal saved state loads separately through authenticated requests. The nearby-spots list on each page is computed at build time from the same coordinates the importer uses.
 
 ## Development
 
@@ -120,7 +124,7 @@ Once healthy, the services are available at:
 | Documentation (`just docs`) | <http://localhost:7503> |
 | Postgres | `127.0.0.1:5432` |
 
-The backend applies its migrations before it starts serving, so a fresh checkout gets a working schema without a separate step. Follow logs with `just logs`, stop services while preserving local data with `just shutdown`, or remove the data volumes with `just clean`.
+The backend applies its migrations before it starts serving, so a fresh checkout gets a working schema without a separate step. Follow logs with `just logs` and stop services while preserving local data with `just shutdown`. `just clean` deletes the database volumes, including accounts and private favourites. Back up any user-owned data before using it.
 
 ### Running one application
 
@@ -160,7 +164,7 @@ The OpenStreetMap cafés are a committed snapshot of their own, refreshed separa
 just ingest-osm
 ```
 
-The loader validates every record against the shared model and replaces the table's contents in one transaction, so it is safe to re-run and the table can only ever hold records the API can serve.
+The loader validates all records and rejects duplicate IDs before writing. It atomically deletes absent imported IDs and upserts surviving imported IDs, preserving their favourites and updating their display fields. Business-owned spots and their favourites remain unchanged. An empty snapshot removes only imported spots and their favourites. Validation errors, owned-ID collisions, and write failures leave all data unchanged. See [Data lifecycle](docs/source/database.md#data-lifecycle).
 
 ### Checks
 
@@ -188,6 +192,8 @@ just aws-init aws-build aws-apply aws-migrate aws-load aws-frontend aws-verify
 ```
 
 Because the RDS instance has no public endpoint, migrations and data loads run as Lambda invocations rather than from a laptop. `just aws-plan` previews a change, `just aws-db-stop` and `just aws-db-start` pause the database between work sessions, and `just aws-destroy` removes the stack. [`infra/README.md`](infra/README.md) covers the stack, what it costs, and the three account constraints the configuration works around.
+
+Accounts and favourites cannot be rebuilt from `data/spots.json`. Keep a consistent database backup before migrations, dataset replacement, or stack destruction. Normal application rollback keeps the favourites migration applied and retains the feature-aware loader. See [Backup and consistent restore](docs/source/database.md#backup-and-consistent-restore) and [Rollback](docs/source/deployment.md#rollback).
 
 GitHub Actions runs repository, container, documentation, and Terraform checks, and performs no deployment of its own. Feature pull requests target `develop`; release pull requests merge `develop` into `main`. See the [deployment guide](docs/source/deployment.md) for the environment model and rollback behavior.
 

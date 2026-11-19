@@ -45,7 +45,7 @@ The database is a Postgres container, and the application reaches it through one
 DATABASE_URL=postgresql://studyspot:studyspot@localhost:5432/studyspot
 ```
 
-Inside Compose the host is the service name, `postgres`; outside it, the same database is published on `127.0.0.1:5432`. Settings already default to that published port, so native development needs no configuration at all. `.env.example` lists the variables worth overriding, and `just` picks up a `.env` copied from it without any exporting. No hosted database, account, or token is involved in local development.
+Inside Compose the host is the service name, `postgres`; outside it, the same database is published on `127.0.0.1:5432`. Settings already default to that published port, so native development needs no database configuration. `.env.example` lists the variables worth overriding, and `just` picks up a `.env` copied from it without any exporting. Public browsing needs no hosted database, account, or token. Favourites require [Auth0 configuration](accounts.md#configuration) and a completed student account.
 
 Populate the database before using the study-spot routes:
 
@@ -54,7 +54,7 @@ just load-data
 curl --fail 'http://localhost:7501/spots?limit=5'
 ```
 
-`just load-data` replaces the table's contents with `data/spots.json` in one transaction and is safe to re-run. Before any data can be loaded the schema has to exist: Compose migrates on startup, and outside Compose that is `just migrate`.
+`just load-data` validates the snapshot and updates imported study spots in one transaction. Surviving imported IDs retain their favourites. Absent imported IDs lose their favourites. Business-owned spots and their favourites remain unchanged, including for an empty snapshot. Invalid snapshots, owned-ID collisions, and write failures leave all data unchanged. See [Data lifecycle](database.md#data-lifecycle). Before loading data, apply the schema with `just migrate` outside Compose. Compose migrates on startup.
 
 To work on the backend without running the whole system:
 

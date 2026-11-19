@@ -51,7 +51,7 @@ async function started(account?: Account, onPost?: (body: unknown) => Response) 
 	const client = {
 		checkSession: async () => {},
 		isAuthenticated: async () => account !== undefined,
-		getTokenSilently: async () => 'token',
+		getTokenSilently: async () => `header.${btoa(JSON.stringify({ sub: 'auth0|ada' }))}.signature`,
 		getIdTokenClaims: async () => ({ __raw: 'id-token' }),
 		loginWithRedirect: async () => {},
 		handleRedirectCallback: async () => ({}),

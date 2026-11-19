@@ -6,7 +6,7 @@ Sign-up starts on StudySpot's own page, `/signup`. It asks whether the account i
 
 StudySpot keeps an `Account` row per person, recording whether they are a student or a business owner.
 
-Accounts are switched off for now: communities and chat are open to guests (see [Communities](communities.md)). Set `STUDYSPOT_ACCOUNTS=true` alongside the Auth0 settings to turn sign-in back on. While it is off, or with no Auth0 settings, `GET /auth/config` reports `{"enabled": false}`, the header shows no log-in controls, bearer tokens are refused with a 401, and search works exactly as before.
+Accounts are switched off by default. Communities and chat remain open to browser-session guests (see [Communities](communities.md)). Set `STUDYSPOT_ACCOUNTS=true` alongside the Auth0 settings to turn sign-in on. While it is off, or with no Auth0 settings, `GET /auth/config` reports `{"enabled": false}` and bearer tokens are refused with a `401`. The header hides login and Favourites navigation, Save and Unsave controls are hidden, and public search and spot details remain available.
 
 ## How it fits together
 
@@ -32,6 +32,20 @@ The first `GET /account` after a sign-up creates the account. Its `account_type`
 - **Business:** needs a verified email and a business name.
 
 The choice is made once.
+
+## Student favourites
+
+Only completed student accounts can save, list, or remove favourites. The API checks the stored `account_type` on every operation. A valid login alone is not enough. Business and unfinished accounts receive `409 conflict`. Community guest access does not grant access to favourites.
+
+Search results and study-spot detail pages offer **Save** and **Unsave** controls. On result cards, these controls sit beside the spot title, separate from the **Maps** and **Share** actions below. Completed students also have a **Favourites** page at `/favourites`, with removal controls and list/map views of their saved spots. Business accounts have no favourites controls.
+
+When a visitor selects **Save**, an inline prompt offers login or signup. After authentication and any required account completion, the browser returns to the originating `/spots/{id}` page. The continuation survives email-verification refreshes and manual completion. It accepts only same-origin paths, belongs to the current login journey, and is cleared on logout or an unrelated journey. It never contains a saved-action instruction. The student must select **Save** again.
+
+Each account's favourites are private. The server derives ownership from the authenticated account, never from an account ID supplied by the browser. The browser uses the access token's stable subject to scope its saved state, not an email or a username. It clears that state on logout or account changes, including changes signaled by another tab. A recoverable action failure preserves the last confirmed state and offers a retry rather than reporting success.
+
+Only an authorization failure belonging to the active favourites scope can invalidate the session. Errors from an obsolete operation do not invalidate a recovered session. An API `409` clears the favourites collection while account eligibility is rechecked. Reads and actions started before that rejection cannot restore saved state afterward, even within the same login session.
+
+The `/favourites` HTML is a prerendered shell with no personal data. The browser loads the current student's list through authenticated requests. Favourite API responses, including errors, are private and not stored in caches. See the [Favourites API](api.md#favourites) for pagination, ordering, and idempotent save and removal behavior.
 
 ## Setting up Auth0
 
@@ -179,5 +193,13 @@ These parts of the accounts epic are still to come:
 - Editing a student profile (university, courses, subjects).
 - Choosing which profile fields other students can see.
 - Editing a business profile (contact email, phone number).
+
+Completed student accounts have a `StudentProfile` used by the People directory. Students can edit
+their school, courses, study topics, and preferred study spot in **My profile** on `/account`.
+They choose which of those fields are public. Their username is searchable by other signed-in
+students by default; a student can opt out of discovery. Directory filters include course, study
+topic, selected study spot, and nearby profile study spots using a one-time browser location. The
+People tab links to public student profiles and starts direct conversations through the existing
+community DM service. Public profile responses never include email or Auth0 identifiers.
 
 Each will add fields to `Account` or a model beside it. Logging in will not change.

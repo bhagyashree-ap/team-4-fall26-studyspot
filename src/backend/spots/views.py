@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from django.db import transaction
 from django.db.models import Count, Expression, F, IntegerField, Q, QuerySet, Value
 from django.db.models.functions import ASin, Cast, Cos, Least, Power, Radians, Round, Sin, Sqrt
 from rest_framework import status
@@ -333,15 +334,16 @@ def business_account(request: Request) -> Account:
     return account
 
 
-def owned_listing(request: Request, spot_id: str) -> StudySpot:
+def owned_listing(request: Request, spot_id: str, *, for_update: bool = False) -> StudySpot:
     """The listing ``spot_id``, provided the caller's business account owns it.
 
     Someone else's listing and an imported spot are both answered as not found:
     from here, the caller has no listing by that identifier.
     """
     account = business_account(request)
+    spots = StudySpot.objects.select_for_update() if for_update else StudySpot.objects
     try:
-        return StudySpot.objects.get(pk=spot_id, owner=account)
+        return spots.get(pk=spot_id, owner=account)
     except StudySpot.DoesNotExist:
         raise NotFound(f"You have no listing with the identifier {spot_id!r}.") from None
 
@@ -376,6 +378,8 @@ class ListingDetailView(APIView):
         serializer.is_valid(raise_exception=True)
         return Response(StudySpotSerializer(serializer.save()).data)
 
+    @transaction.atomic
     def delete(self, request: Request, spot_id: str) -> Response:
-        owned_listing(request, spot_id).delete()
+        # Lock before Django collects cascading favourites so it sees preceding saves.
+        owned_listing(request, spot_id, for_update=True).delete()
         return Response(status=status.HTTP_204_NO_CONTENT)

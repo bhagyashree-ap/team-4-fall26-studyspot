@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 from django.db import InterfaceError, OperationalError, ProgrammingError
 from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.utils.cache import patch_cache_control
 
 from .errors import error_json_response
 
@@ -50,8 +51,10 @@ class DatabaseUnavailableMiddleware:
             request.path,
             exception,
         )
-        return error_json_response(
+        response = error_json_response(
             503,
             "database_unavailable",
             "The study-spot database is unavailable.",
         )
+        patch_cache_control(response, private=True, no_store=True)
+        return response

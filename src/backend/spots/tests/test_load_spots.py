@@ -1,13 +1,9 @@
-"""Tests for the dataset loader.
-
-``data/spots.json`` is the source of truth and the ``spots`` table is a
-rebuildable projection of it, so what matters here is that the projection ends
-up exactly matching the snapshot, including for records the snapshot drops.
-"""
+"""Tests for the dataset loader."""
 
 from __future__ import annotations
 
 import json
+from io import StringIO
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +11,11 @@ import pytest
 from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.core.management.base import CommandError
+from django.db import IntegrityError, connection
 
-from accounts.models import Account, AccountType
+from accounts.models import Account, AccountType, Favourite
+from accounts.tests.test_favourites_api import create_account
+from spots.management.commands.load_spots import CONTRACT_FIELDS
 from spots.models import StudySpot
 
 from .test_spots_api import RECORDS
@@ -34,6 +33,23 @@ def load(path: Path) -> None:
     call_command("load_spots", dataset=path)
 
 
+@pytest.fixture
+def owned_spot() -> StudySpot:
+    user = get_user_model().objects.create(username="auth0|owner")
+    owner = Account.objects.create(
+        user=user, account_type=AccountType.BUSINESS, business_name="Corner Cafe"
+    )
+    return StudySpot.objects.create(
+        id="listing:corner",
+        name="Corner Cafe",
+        category="cafe",
+        borough="Manhattan",
+        latitude=40.7259,
+        longitude=-73.9946,
+        owner=owner,
+    )
+
+
 class TestLoading:
     def test_writes_every_record(self, tmp_path: Path) -> None:
         load(write_snapshot(tmp_path, RECORDS))
@@ -46,8 +62,6 @@ class TestLoading:
         assert StudySpot.objects.count() == len(RECORDS)
 
     def test_drops_records_removed_upstream(self, tmp_path: Path) -> None:
-        # The table is a projection, so an upsert would wrongly keep rows the
-        # importer no longer produces.
         load(write_snapshot(tmp_path, RECORDS))
         load(write_snapshot(tmp_path, RECORDS[:2]))
         assert StudySpot.objects.count() == 2
@@ -58,26 +72,10 @@ class TestLoading:
         load(write_snapshot(tmp_path, []))
         assert StudySpot.objects.count() == 0
 
-    def test_keeps_listings_a_business_owns(self, tmp_path: Path) -> None:
-        # Owned listings are not in the snapshot, so replacing the projection
-        # must not take them with it.
-        user = get_user_model().objects.create(username="auth0|owner")
-        owner = Account.objects.create(
-            user=user, account_type=AccountType.BUSINESS, business_name="Corner Cafe"
-        )
-        StudySpot.objects.create(
-            id="listing:corner",
-            name="Corner Cafe",
-            category="cafe",
-            borough="Manhattan",
-            latitude=40.7259,
-            longitude=-73.9946,
-            owner=owner,
-        )
-
+    def test_keeps_listings_a_business_owns(self, tmp_path: Path, owned_spot: StudySpot) -> None:
         load(write_snapshot(tmp_path, []))
 
-        assert list(StudySpot.objects.values_list("pk", flat=True)) == ["listing:corner"]
+        assert list(StudySpot.objects.values_list("pk", flat=True)) == [owned_spot.pk]
 
     def test_a_record_without_a_university_loads(self, tmp_path: Path) -> None:
         # Snapshots produced before the field existed omit it entirely.
@@ -253,3 +251,220 @@ class TestTheThreeStateFieldsLoadAsThreeStates:
         record = {**self.OLDER_SNAPSHOT_RECORD, "opening_hours": hours}
 
         assert to_spot(record, 0).opening_hours == hours
+
+
+class TestFavouriteSnapshotLifecycle:
+    def test_retained_ids_keep_saved_links_and_absent_ids_cascade(self, tmp_path: Path) -> None:
+        load(write_snapshot(tmp_path, RECORDS))
+        account = create_account("auth0|student")
+        kept = Favourite.objects.create(account=account, spot_id=RECORDS[0]["id"])
+        Favourite.objects.create(account=account, spot_id=RECORDS[1]["id"])
+        replacement = [
+            {**RECORDS[0], "name": "Refreshed library"},
+            {**RECORDS[2], "id": "facdb:new"},
+        ]
+
+        load(write_snapshot(tmp_path, replacement))
+
+        assert set(StudySpot.objects.values_list("pk", flat=True)) == {
+            RECORDS[0]["id"],
+            "facdb:new",
+        }
+        current = Favourite.objects.get()
+        assert current.pk == kept.pk
+        assert current.created_at == kept.created_at
+        assert current.spot.name == "Refreshed library"
+
+    def test_empty_snapshot_cascades_imported_saved_links(self, tmp_path: Path) -> None:
+        load(write_snapshot(tmp_path, RECORDS))
+        account = create_account("auth0|student")
+        Favourite.objects.create(account=account, spot_id=RECORDS[0]["id"])
+
+        load(write_snapshot(tmp_path, []))
+
+        assert not StudySpot.objects.exists()
+        assert not Favourite.objects.exists()
+        assert account.favourites.count() == 0
+
+    @pytest.mark.parametrize("empty", [False, True])
+    def test_owned_listings_and_saved_links_survive_snapshot_replacement(
+        self, tmp_path: Path, owned_spot: StudySpot, empty: bool
+    ) -> None:
+        load(write_snapshot(tmp_path, RECORDS))
+        account = create_account("auth0|student")
+        retained = Favourite.objects.create(account=account, spot_id=RECORDS[0]["id"])
+        Favourite.objects.create(account=account, spot_id=RECORDS[1]["id"])
+        owned = Favourite.objects.create(account=account, spot=owned_spot)
+        previous_owned = StudySpot.objects.values().get(pk=owned_spot.pk)
+        records = (
+            []
+            if empty
+            else [
+                {**RECORDS[0], "name": "Refreshed library"},
+                {**RECORDS[2], "id": "facdb:new"},
+            ]
+        )
+        path = write_snapshot(tmp_path, records)
+        output = StringIO()
+
+        call_command("load_spots", dataset=path, stdout=output)
+
+        assert set(StudySpot.objects.values_list("pk", flat=True)) == {
+            owned_spot.pk,
+            *(record["id"] for record in records),
+        }
+        assert StudySpot.objects.values().get(pk=owned_spot.pk) == previous_owned
+        expected_favourites = [owned] if empty else [owned, retained]
+        assert set(Favourite.objects.values_list("pk", flat=True)) == {
+            favourite.pk for favourite in expected_favourites
+        }
+        for favourite in expected_favourites:
+            current = Favourite.objects.get(pk=favourite.pk)
+            assert current.created_at == favourite.created_at
+            assert current.account_id == favourite.account_id
+            assert current.spot_id == favourite.spot_id
+        if not empty:
+            refreshed = StudySpot.objects.get(pk=RECORDS[0]["id"])
+            assert refreshed.name == "Refreshed library"
+            assert refreshed.owner_id is None
+        assert f"loaded {len(records)} spots from {path}" in output.getvalue()
+
+    @pytest.mark.parametrize("collision_index", [0, 500])
+    def test_owned_identifier_collision_leaves_spots_and_favourites_unchanged(
+        self, tmp_path: Path, owned_spot: StudySpot, collision_index: int
+    ) -> None:
+        load(write_snapshot(tmp_path, RECORDS))
+        account = create_account("auth0|student")
+        Favourite.objects.create(account=account, spot_id=RECORDS[0]["id"])
+        Favourite.objects.create(account=account, spot_id=RECORDS[1]["id"])
+        Favourite.objects.create(account=account, spot=owned_spot)
+        previous_spots = list(StudySpot.objects.values())
+        previous_favourites = list(Favourite.objects.values())
+        records = [
+            {**RECORDS[0], "name": "Updated before collision"},
+            *[{**RECORDS[0], "id": f"facdb:new-{index}"} for index in range(500)],
+        ]
+        records[collision_index] = {
+            **RECORDS[0],
+            "id": owned_spot.pk,
+            "name": "Snapshot must not take ownership",
+        }
+
+        with pytest.raises(CommandError, match="business-owned"):
+            load(write_snapshot(tmp_path, records))
+
+        assert list(StudySpot.objects.values()) == previous_spots
+        assert list(Favourite.objects.values()) == previous_favourites
+
+    @pytest.mark.parametrize(
+        "failure",
+        ["invalid_last", "duplicate_nearby", "duplicate_across_batches", "owner", "owner_id"],
+    )
+    def test_rejected_snapshots_leave_spots_and_favourites_unchanged(
+        self, tmp_path: Path, owned_spot: StudySpot, failure: str
+    ) -> None:
+        load(write_snapshot(tmp_path, RECORDS))
+        account = create_account("auth0|student")
+        Favourite.objects.create(account=account, spot_id=RECORDS[1]["id"])
+        Favourite.objects.create(account=account, spot=owned_spot)
+        previous_spots = list(StudySpot.objects.values())
+        previous_favourites = list(Favourite.objects.values())
+        records = [{**RECORDS[0], "id": f"facdb:replacement-{index}"} for index in range(501)]
+        if failure == "invalid_last":
+            records[-1]["latitude"] = 91
+        elif failure == "duplicate_nearby":
+            records[1]["id"] = records[0]["id"]
+        elif failure == "duplicate_across_batches":
+            records[-1]["id"] = records[0]["id"]
+        else:
+            records[-1][failure] = owned_spot.owner_id
+
+        with pytest.raises(CommandError):
+            load(write_snapshot(tmp_path, records))
+
+        assert list(StudySpot.objects.values()) == previous_spots
+        assert list(Favourite.objects.values()) == previous_favourites
+
+    @pytest.mark.django_db(transaction=True)
+    def test_later_write_failure_restores_prior_updates_deletions_and_saved_links(
+        self, tmp_path: Path, owned_spot: StudySpot
+    ) -> None:
+        load(write_snapshot(tmp_path, RECORDS))
+        account = create_account("auth0|student")
+        Favourite.objects.create(account=account, spot_id=RECORDS[0]["id"])
+        Favourite.objects.create(account=account, spot_id=RECORDS[1]["id"])
+        Favourite.objects.create(account=account, spot=owned_spot)
+        previous_spots = list(StudySpot.objects.values())
+        previous_favourites = list(Favourite.objects.values())
+        records = [
+            {**RECORDS[0], "name": "Updated before failure"},
+            *[{**RECORDS[0], "id": f"facdb:new-{index}"} for index in range(499)],
+            {**RECORDS[0], "id": "facdb:rejected", "name": "Rejected by database"},
+        ]
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "ALTER TABLE spots ADD CONSTRAINT favourites_test_write_failure "
+                "CHECK (name <> 'Rejected by database')"
+            )
+        try:
+            with pytest.raises(IntegrityError):
+                load(write_snapshot(tmp_path, records))
+        finally:
+            with connection.cursor() as cursor:
+                cursor.execute("ALTER TABLE spots DROP CONSTRAINT favourites_test_write_failure")
+
+        assert list(StudySpot.objects.values()) == previous_spots
+        assert list(Favourite.objects.values()) == previous_favourites
+
+    def test_upsert_refreshes_every_mutable_field_including_unknown_values(
+        self, tmp_path: Path
+    ) -> None:
+        original = {
+            **RECORDS[0],
+            "operator": "Original operator",
+            "free_public_wifi": False,
+            "no_purchase_needed": True,
+            "subway_station": "Original station",
+            "subway_routes": "A",
+            "subway_metres": 100,
+            "subway_step_free": "full",
+            "nearby_spots": 1,
+            "outdoor_seating": False,
+            "indoor_seating": True,
+            "venue_wifi": False,
+            "opening_hours": "Mo-Fr 09:00-17:00",
+        }
+        replacement = {
+            "id": original["id"],
+            "name": "Refreshed cafe",
+            "category": "cafe",
+            "address": None,
+            "neighborhood": None,
+            "borough": "Brooklyn",
+            "latitude": 40.7,
+            "longitude": -73.9,
+            "university": None,
+            "operator": None,
+            "free_public_wifi": True,
+            "no_purchase_needed": False,
+            "subway_station": None,
+            "subway_routes": None,
+            "subway_metres": None,
+            "subway_step_free": None,
+            "nearby_spots": 25,
+            "outdoor_seating": True,
+            "indoor_seating": False,
+            "venue_wifi": True,
+            "opening_hours": None,
+        }
+        assert set(original) == set(replacement) == CONTRACT_FIELDS
+        load(write_snapshot(tmp_path, [original]))
+        account = create_account("auth0|student")
+        favourite = Favourite.objects.create(account=account, spot_id=original["id"])
+
+        load(write_snapshot(tmp_path, [replacement]))
+
+        current = StudySpot.objects.get(pk=original["id"])
+        for field, value in replacement.items():
+            assert getattr(current, field) == value, field
+        assert Favourite.objects.get().pk == favourite.pk

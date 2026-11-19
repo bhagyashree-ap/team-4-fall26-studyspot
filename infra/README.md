@@ -39,8 +39,9 @@ Two things that are easy to get wrong on a credit-funded account:
 - **When a free plan expires, AWS closes the account** and the resources go with
   it. Data is retained for 90 days and upgrading restores access. This is the
   reason the stack is defined here rather than clicked together in the console:
-  the infrastructure is this directory and the data is `data/spots.json`, so
-  rebuilding is one `apply` and one `load`.
+  the infrastructure can be recreated from this directory and imported spots
+  from `data/spots.json`. Business-owned spots, accounts, and favourites require
+  a consistent database backup. See [Backup and consistent restore](../docs/source/database.md#backup-and-consistent-restore).
 
 ## Prerequisites
 

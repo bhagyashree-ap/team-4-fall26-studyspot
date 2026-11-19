@@ -123,26 +123,22 @@ resource "aws_cloudfront_distribution" "main" {
     }
   }
 
-  # Custom error responses apply to every behavior in the distribution, which
-  # is why only 403 is mapped and 404 is left alone. Mapping 404 would rewrite
-  # the API's own `not_found` envelope into HTML, and a client parsing JSON
-  # would get a page instead.
+  # No custom_error_response here, deliberately.
   #
-  # 403 is unambiguous here: the API has no authentication and never returns
-  # one, so the only thing that produces it is S3. A missing key reads as
-  # AccessDenied rather than NoSuchKey because the OAC policy deliberately
-  # grants GetObject and not ListBucket -- without permission to list, S3 will
-  # not confirm that a key is absent. Left unmapped, a mistyped URL served the
-  # visitor a raw S3 XML error document.
+  # It is configured per distribution rather than per behavior, so the previous
+  # rule mapping 403 to /404.html also caught /api/*. That was sound while the
+  # API had no authentication and never returned 403; once CSRF and permission
+  # checks arrived it began rewriting their JSON into an HTML page, so a
+  # forbidden write looked to the client like a missing endpoint.
   #
-  # The short TTL keeps a genuine 403 during a deployment -- a file uploaded a
-  # moment later -- from being cached as missing for an hour.
-  custom_error_response {
-    error_code            = 403
-    response_code         = 404
-    response_page_path    = "/404.html"
-    error_caching_min_ttl = 10
-  }
+  # S3 would answer a missing key with 403 AccessDenied, which hides the real
+  # status, so web.tf grants ListBucket as well and a miss comes back as 404
+  # NoSuchKey instead. The body is S3's XML rather than the styled page: a
+  # viewer response function cannot fix that, because CloudFront does not invoke
+  # one when the origin returns 400 or higher, and only a Lambda@Edge origin
+  # response can rewrite an origin error -- which must live in us-east-1, where
+  # the organization's policy denies it. An honest status with a plain body is
+  # the best available here, and it only shows on a mistyped URL.
 
   restrictions {
     geo_restriction {

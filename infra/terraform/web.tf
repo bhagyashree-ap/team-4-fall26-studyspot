@@ -54,11 +54,16 @@ resource "aws_s3_bucket_versioning" "site" {
 
 data "aws_iam_policy_document" "site" {
   statement {
-    sid     = "AllowCloudFrontRead"
-    effect  = "Allow"
-    actions = ["s3:GetObject"]
+    sid    = "AllowCloudFrontRead"
+    effect = "Allow"
+    # ListBucket as well as GetObject, so that S3 distinguishes a missing key
+    # from a forbidden one. Without it S3 refuses to confirm whether an object
+    # exists and answers AccessDenied, so every mistyped URL arrived as a 403.
+    # It grants no listing to the public: the bucket is reachable only through
+    # the distribution, and CloudFront never issues a ListObjects request.
+    actions = ["s3:GetObject", "s3:ListBucket"]
 
-    resources = ["${aws_s3_bucket.site.arn}/*"]
+    resources = [aws_s3_bucket.site.arn, "${aws_s3_bucket.site.arn}/*"]
 
     principals {
       type        = "Service"

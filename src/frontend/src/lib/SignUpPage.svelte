@@ -1,13 +1,22 @@
 <script lang="ts">
 	import * as Card from '$lib/components/ui/card';
 	import { resolve } from '$app/paths';
+	import { onMount } from 'svelte';
 	import SiteHeader from './SiteHeader.svelte';
 	import SignUpForm from './SignUpForm.svelte';
 	import type { CompleteSignUp } from './contract';
-	import { session as shared, type Session } from './session.svelte';
+	import { safeReturnTo, session as shared, type Session } from './session.svelte';
 
 	/** Replaceable so a test can render the page in any state. */
 	let { session = shared }: { session?: Session } = $props();
+	let returnTo = $state('/account');
+
+	onMount(() => {
+		returnTo = safeReturnTo(
+			new URLSearchParams(window.location.search).get('returnTo') ?? '/account'
+		);
+		session.rememberReturnTo(returnTo);
+	});
 
 	/**
 	 * StudySpot asks its own questions first, then hands over to Auth0 for the
@@ -15,7 +24,7 @@
 	 * in the session and are applied when the browser comes back verified.
 	 */
 	async function next(choice: CompleteSignUp): Promise<void> {
-		await session.signUp(choice);
+		await session.signUp(choice, returnTo);
 	}
 </script>
 
@@ -32,7 +41,9 @@
 				<p class="eyebrow">Accounts</p>
 				<h1 id="sign-up-title">You’re already signed in.</h1>
 				<div class="actions">
-					<a class="primary" href={resolve('/account')}>Go to your account</a>
+					<a class="primary" href={resolve(`/account?returnTo=${encodeURIComponent(returnTo)}`)}
+						>Go to your account</a
+					>
 				</div>
 			{:else}
 				<p class="eyebrow">Create your account</p>
@@ -50,7 +61,7 @@
 
 				<p class="hint">
 					Already have an account?
-					<button class="link" type="button" onclick={() => session.logIn('/account')}>
+					<button class="link" type="button" onclick={() => session.logIn(returnTo)}>
 						Log in
 					</button>
 				</p>

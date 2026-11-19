@@ -1,16 +1,11 @@
 """Copy the normalized dataset into the serving database.
 
-``data/spots.json`` is the source of truth; the ``spots`` table is a rebuildable
-projection of it:
+``data/spots.json`` is the source of truth for imported spots. Business-owned
+listings are independent and are never replaced by a dataset refresh.
 
 .. code-block:: shell
 
     just load-data
-
-Every record is validated against the model before anything is written, so the
-serving table can only ever hold records the API can serve. The whole load is
-one transaction: a snapshot that fails validation halfway leaves the previous
-contents in place rather than a half-replaced table.
 
 On AWS this runs inside a Lambda function, because the database sits in a
 private subnet and nothing outside the VPC can reach it. See
@@ -26,7 +21,7 @@ from typing import Any
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
-from django.db import transaction
+from django.db import connection, transaction
 
 from spots.models import Borough, StudySpot
 
@@ -167,15 +162,36 @@ class Command(BaseCommand):
         if not isinstance(records, list):
             raise CommandError(f"{dataset} must contain a JSON array of study spots.")
 
-        spots = [to_spot(record, index) for index, record in enumerate(records)]
+        spots = []
+        identifiers = set()
+        for index, record in enumerate(records):
+            spot = to_spot(record, index)
+            if spot.pk in identifiers:
+                raise CommandError(f"Record {index} repeats study spot identifier {spot.pk!r}.")
+            identifiers.add(spot.pk)
+            spots.append(spot)
 
+        update_fields = [
+            field.name
+            for field in StudySpot._meta.concrete_fields
+            if not field.primary_key and not field.generated and field.name != "owner"
+        ]
         with transaction.atomic():
-            # The table is a rebuildable projection, so a record dropped
-            # upstream must disappear here too. That is why this replaces rather
-            # than upserts. Listings a business account owns are not part of
-            # the snapshot, so they are left alone.
-            StudySpot.objects.filter(owner__isnull=True).delete()
-            StudySpot.objects.bulk_create(spots, batch_size=BATCH_SIZE)
+            # Saves acquire ROW SHARE before writing favourites. EXCLUSIVE makes
+            # deletion and its cascade observe every save that preceded this refresh.
+            with connection.cursor() as cursor:
+                table = connection.ops.quote_name(StudySpot._meta.db_table)
+                cursor.execute(f"LOCK TABLE {table} IN EXCLUSIVE MODE")
+            if StudySpot.objects.filter(owner__isnull=False, pk__in=identifiers).exists():
+                raise CommandError("Snapshot identifiers collide with business-owned study spots.")
+            StudySpot.objects.filter(owner__isnull=True).exclude(pk__in=identifiers).delete()
+            StudySpot.objects.bulk_create(
+                spots,
+                batch_size=BATCH_SIZE,
+                update_conflicts=True,
+                unique_fields=["id"],
+                update_fields=update_fields,
+            )
 
         # `len(spots)` rather than a table count: the delete above leaves owned
         # listings in place, and counting the table would fold them into a

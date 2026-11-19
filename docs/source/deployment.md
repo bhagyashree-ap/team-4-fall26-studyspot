@@ -2,6 +2,8 @@
 
 StudySpot has one deployment target: AWS. The SvelteKit frontend is prerendered to S3 behind CloudFront, and the Django application runs as a Lambda function behind the same distribution, which strips the public `/api` prefix before Django sees the request so the application needs no second copy of its routes.
 
+The `/favourites` route is a prerendered shell with no personal data. The existing CloudFront rewrite serves `/favourites.html` for direct visits and refreshes. The browser loads saved state through authenticated API requests. All favourites API responses, including errors, are `private` and `no-store`.
+
 | Part | How it is served | Driven by |
 |---|---|---|
 | Frontend | S3 behind CloudFront, prerendered with `adapter-static` | `just aws-frontend` |
@@ -57,14 +59,14 @@ just aws-frontend
 just aws-verify
 ```
 
-Redeploying later is `just aws-build` and `just aws-apply` for the backend, or `just aws-frontend` alone for the frontend. `just aws-plan` previews a change without applying it.
+Redeploying later is `just aws-build` and `just aws-apply` for the backend, or `just aws-frontend` alone for the frontend. Ship additive, schema-compatible backend code, apply its migrations with `just aws-migrate`, and then publish frontend controls that require them. `just aws-plan` previews a change without applying it.
 
 `infra/README.md` is the source of truth for this target and is not duplicated here. Read it before the first apply: it covers what the stack costs and which lever reduces it, the AWS credentials the Terraform needs, why there is no NAT gateway, how the database password reaches the function, why Terraform state has to move off a laptop before anyone else touches the stack, and the three account constraints the configuration works around.
 
 Two things are worth repeating because they are easy to discover too late:
 
 - `just aws-db-stop` stops the database and bills storage only. AWS restarts a stopped instance automatically after seven days, so this is a recurring chore.
-- Nothing in the stack is irreplaceable. The infrastructure is `infra/` and the data is `data/spots.json`, so a destroyed stack is one `apply` and one `load` away from working again.
+- `just aws-destroy` can delete the database, including accounts and private favourites. Terraform and `data/spots.json` cannot recreate user-owned data. Keep a recoverable backup outside the stack before destruction.
 
 ## Data and search state
 
@@ -74,10 +76,16 @@ Locally the same step is `just load-data`, after `just start-db` and `just migra
 
 Search needs no separate deployed component. It is Postgres full text over a generated `tsvector` column, with `pg_trgm` similarity behind it for misspellings, so the only deployment step it requires is the migration that creates the column, the extension and their GIN indexes.
 
-While every record comes from the normalized public snapshot, any environment's database can be cleared and reloaded. Once StudySpot stores corrections, favorites, accounts, import cursors, or other non-reproducible state, backups and backward-compatible migrations become release requirements.
+Business-owned spots, accounts, and favourites are non-rebuildable user data. Backups and backward-compatible migrations are release requirements now. Use a consistent full-database backup or RDS snapshot, and restore spots, accounts, favourites, and migration history together. See [Backup and consistent restore](database.md#backup-and-consistent-restore) for retention, access, and restore requirements.
+
+The feature-aware loader preserves favourites when imported spot IDs survive a refresh. It removes favourites only for imported IDs absent from the replacement. Business-owned spots and their favourites remain unchanged, including for an empty replacement. Validation errors, owned-ID collisions, and write failures leave all data unchanged. Review the replacement dataset before running `just aws-load`.
+
+The additive `accounts.0002` migration depends on `accounts.0001` and `spots.0012`. Deploy the feature-aware backend and management package, apply migrations, and then publish the favourites frontend. Take a recoverable backup before changing an existing database.
 
 ## Rollback
 
-Roll back by checking out the previous revision and running `just aws-build` and `just aws-apply`; the frontend is `just aws-frontend` from the same checkout. Both read the working tree, so the revision you have checked out is the revision you deploy.
+Choose an application revision compatible with the applied schema. Preserve the feature-aware management package when rolling back the API. Do not replace it with an older management package as part of the rollback. Republish the frontend from the chosen application revision with `just aws-frontend`.
 
-Rollback does not change database contents. Keep schema changes compatible with the previous application revision, or reload the matching database state separately — which, while the table is a projection of `spots.json`, means loading the snapshot from that revision.
+Normal application rollback leaves the additive favourites migration applied. Do not reverse it or reload an older snapshot to roll back application code. Reversing the migration deletes favourites, and an older snapshot can omit saved spot IDs.
+
+Keep the feature-aware management package and `load_spots` command available after an application rollback. Do not run `just aws-load` from an older checkout against a database containing favourites. Compatibility of an older loader with saved relationships is an operational prerequisite, not an assumed property. If a schema or data restore is necessary, use a consistent full-database backup and account for writes made since that backup.

@@ -125,7 +125,7 @@ test-e2e:
 ingest:
     cd data && uv run --project ../src/backend python ingest.py
 
-# Copy data/spots.json into the local database.
+# Replace public spots from data/spots.json. Absent IDs lose their favourites.
 load-data:
     cd src/backend && uv run python manage.py load_spots
 
@@ -145,7 +145,8 @@ shutdown:
 logs:
     docker compose logs --follow
 
-# Stop the local system and delete its database and search data.
+# Delete the local database volume, including accounts and private favourites.
+# Back up user-owned data first. Loading spots.json cannot restore it.
 clean:
     docker compose down --volumes --remove-orphans
 
@@ -187,7 +188,7 @@ aws-migrate:
     aws lambda invoke --function-name "$({{tf}} output -raw manage_function_name)" \
       --payload '{"command":"migrate"}' --cli-binary-format raw-in-base64-out /dev/stdout
 
-# Load the bundled data/spots.json snapshot into the deployed database.
+# Replace deployed spots from the bundled snapshot. Absent IDs lose favourites.
 aws-load:
     aws lambda invoke --function-name "$({{tf}} output -raw manage_function_name)" \
       --payload '{"command":"load_spots"}' --cli-binary-format raw-in-base64-out /dev/stdout
@@ -246,9 +247,9 @@ aws-db-stop:
 aws-db-start:
     aws rds start-db-instance --db-instance-identifier "$({{tf}} output -raw database_identifier)"
 
-# Nothing here is irreplaceable: the infrastructure is this repository and the
-# data is data/spots.json, so a destroyed stack is one apply away from returning.
+# Back up user-owned data outside this stack before destruction.
+# Terraform and data/spots.json cannot recreate accounts or private favourites.
 
-# Tear the whole AWS stack down.
+# Tear the whole AWS stack down, including its database.
 aws-destroy:
     {{tf}} destroy

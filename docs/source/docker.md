@@ -55,11 +55,13 @@ Application containers should be replaceable. The Postgres data directory lives 
 docker compose down
 ```
 
-Deleting volumes intentionally resets state:
+Deleting volumes permanently removes accounts and private favourites as well as public study spots. Back up user-owned data before running:
 
 ```shell
 docker compose down --volumes
 ```
+
+Reloading `data/spots.json` cannot recreate accounts or favourites. See [Backup and consistent restore](database.md#backup-and-consistent-restore).
 
 ## Health and startup order
 

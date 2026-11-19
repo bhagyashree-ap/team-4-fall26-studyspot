@@ -2,13 +2,62 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 from django.conf import settings
 from django.core.exceptions import ValidationError as DjangoValidationError
 from rest_framework import serializers
 
-from .models import Account, AccountType, username_validator
+from .models import Account, AccountType, StudentProfile, username_validator
+
+
+class StudentProfileSerializer(serializers.ModelSerializer):
+    study_spot_id = serializers.CharField(max_length=255, allow_blank=True, required=False)
+
+    class Meta:
+        model = StudentProfile
+        fields = ("school", "courses", "topics", "study_spot_id", "visible_fields", "discoverable")
+
+    def validate(self, attrs: dict[str, Any]) -> dict[str, Any]:
+        for field in ("courses", "topics"):
+            values = attrs.get(field, getattr(self.instance, field, []))
+            if not isinstance(values, list) or len(values) > 30:
+                raise serializers.ValidationError({field: "Provide up to 30 values."})
+            if any(not isinstance(value, str) for value in values):
+                raise serializers.ValidationError({field: "Values must be text."})
+            cleaned = [value.strip() for value in values]
+            if any(not value or len(value) > 100 for value in cleaned):
+                raise serializers.ValidationError(
+                    {field: "Each value must contain 1 to 100 characters."}
+                )
+            attrs[field] = list(dict.fromkeys(cleaned))
+        visible = attrs.get("visible_fields", getattr(self.instance, "visible_fields", []))
+        allowed = {"school", "courses", "topics", "study_spot_id"}
+        if (
+            not isinstance(visible, list)
+            or any(not isinstance(value, str) for value in visible)
+            or not set(visible) <= allowed
+        ):
+            raise serializers.ValidationError({"visible_fields": "Choose supported public fields."})
+        attrs["visible_fields"] = list(dict.fromkeys(visible))
+        return attrs
+
+
+def public_student_profile(profile: StudentProfile) -> dict[str, Any]:
+    raw_visible_fields = cast(object, profile.visible_fields)
+    fields = (
+        {value for value in raw_visible_fields if isinstance(value, str)}
+        if isinstance(raw_visible_fields, list)
+        else set()
+    )
+    result: dict[str, Any] = {
+        "username": profile.account.username,
+        "display_name": profile.account.username,
+    }
+    for name in ("school", "courses", "topics", "study_spot_id"):
+        if name in fields:
+            result[name] = getattr(profile, name)
+    return result
 
 
 class AccountSerializer(serializers.ModelSerializer):

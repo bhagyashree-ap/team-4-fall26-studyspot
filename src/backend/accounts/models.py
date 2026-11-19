@@ -81,3 +81,21 @@ class Account(models.Model):
 
     def __str__(self) -> str:
         return str(self.username or self.email or self.user.username)
+
+
+class StudentProfile(models.Model):
+    """Student discovery details, with an allowlist of publicly shared fields."""
+
+    account = models.OneToOneField(
+        Account, on_delete=models.CASCADE, related_name="student_profile"
+    )
+    school = models.CharField(max_length=160, blank=True)
+    courses = models.JSONField(default=list, blank=True)
+    topics = models.JSONField(default=list, blank=True)
+    study_spot_id = models.TextField(blank=True)
+    visible_fields = models.JSONField(default=list, blank=True)
+    discoverable = models.BooleanField(default=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"Student profile for {self.account.username}"

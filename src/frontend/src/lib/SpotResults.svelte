@@ -7,6 +7,8 @@
 	import { formatDistance, place, readableCategory } from './spot';
 	import { orderByTrunk, routeColour, routeTextColour, walkMinutes } from './subway';
 	import type { NearbySpot, StudySpot } from './contract';
+	import FavouriteButton from './FavouriteButton.svelte';
+	import { favourites } from './favourites.svelte';
 
 	type Props = {
 		spots: (StudySpot | NearbySpot)[];
@@ -21,6 +23,7 @@
 		hasMore: boolean;
 		loadingMore?: boolean;
 		onShowMore?: () => void;
+		showFavouriteError?: boolean;
 		/**
 		 * Which rendering of the results to show. Held by the page rather than
 		 * here, so that choosing the map survives the next search.
@@ -35,6 +38,7 @@
 		hasMore,
 		loadingMore = false,
 		onShowMore,
+		showFavouriteError = true,
 		view = 'list',
 		distanceFrom,
 		onView
@@ -131,6 +135,13 @@
 		</div>
 	</div>
 
+	{#if showFavouriteError && favourites.status === 'error'}
+		<p role="alert">{favourites.error}</p>
+		<button type="button" onclick={() => favourites.load({ refresh: true })}>
+			Retry loading favourites
+		</button>
+	{/if}
+
 	{#if mapFailed && view === 'map'}
 		<p class="status" role="status">
 			The map could not be loaded, so the results are listed instead.
@@ -148,14 +159,19 @@
 		<ul>
 			{#each spots as spot (spot.id)}
 				<li>
-					<h3>
-						<!--
+					<div class="card-heading">
+						<h3>
+							<!--
 						Every detail page is prerendered, so this is a real document
 						rather than a route the browser has to assemble: the link
 						works on a fresh tab, in a shared message, and to a crawler.
 					-->
-						<a href={resolve(`/spots/${spot.id}` as '/')}>{spot.name}</a>
-					</h3>
+							<a href={resolve(`/spots/${spot.id}` as '/')}>{spot.name}</a>
+						</h3>
+						<div class="save-control">
+							<FavouriteButton {spot} showLoadError={false} />
+						</div>
+					</div>
 					<p class="meta">
 						<span class="category">{readableCategory(spot.category)}</span>
 						<span aria-hidden="true">·</span>
@@ -394,6 +410,27 @@
 		font-size: 14px;
 	}
 
+	.card-heading {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-start;
+		gap: 12px;
+		margin-bottom: 12px;
+	}
+
+	.card-heading h3 {
+		flex: 1 1 140px;
+		margin: 0;
+		overflow-wrap: anywhere;
+	}
+
+	.save-control {
+		position: relative;
+		z-index: 1;
+		max-width: 100%;
+		margin-left: auto;
+	}
+
 	ul {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -546,6 +583,7 @@
 		position: relative;
 		z-index: 1;
 		display: flex;
+		flex-wrap: wrap;
 		gap: 10px;
 		margin: 18px 0 0;
 		margin-top: auto;
