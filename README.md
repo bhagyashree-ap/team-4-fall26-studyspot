@@ -1,6 +1,6 @@
 # [StudySpot](https://d1ulyrfyi06kwp.cloudfront.net)
 [![Develop checks](https://github.com/gcivil-nyu-org/team-4-fall26/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/gcivil-nyu-org/team-4-fall26/actions/workflows/ci.yml?query=branch%3Adevelop)
-[![Backend coverage](https://codecov.io/gh/gcivil-nyu-org/team-4-fall26/branch/develop/graph/badge.svg)](https://codecov.io/gh/gcivil-nyu-org/team-4-fall26/branch/develop)
+[![Backend coverage](https://coveralls.io/repos/github/gcivil-nyu-org/team-4-fall26/badge.svg?branch=develop)](https://coveralls.io/github/gcivil-nyu-org/team-4-fall26?branch=develop)
 
 [![Python](https://img.shields.io/badge/python-3.12%2B-blue)](https://python.org)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
