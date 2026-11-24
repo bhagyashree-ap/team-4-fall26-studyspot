@@ -11,8 +11,11 @@ No route has a trailing slash, and the application does not redirect one onto th
 | `GET /health/live` | Reports whether the API process can serve requests. It intentionally does not contact Postgres. |
 | `GET /spots` | Returns a filtered, paginated page of study spots. |
 | `GET /spots/{id}` | Returns one study spot. |
-| `GET /spots/{id}/reviews` | Returns a paginated page of a study spot's reviews, newest first. |
+| `GET /spots/{id}/reviews` | Returns public reviews, newest first, and the overall average. |
 | `POST /spots/{id}/reviews` | Reviews a study spot. Needs a bearer token for a student account. |
+| `GET /spots/{id}/reviews/viewer` | Returns the signed-in account's review or reply access for this spot. |
+| `PATCH`, `DELETE /spots/{id}/reviews/mine` | Updates or deletes the current student's review. |
+| `PUT`, `DELETE /spots/{id}/reviews/{review_id}/reply` | Publishes, updates, or deletes the listing owner's public reply. |
 | `GET /auth/config` | The public Auth0 settings the browser logs in with. See [Accounts](accounts.md). |
 | `GET /account` | The logged-in person's account. Needs a bearer token. |
 | `POST /account` | Finishes sign-up as a student or a business. Needs a bearer token. |
@@ -257,7 +260,7 @@ An omitted optional score is `null`. `body` is free text of at most 2,000 charac
 
 ### `POST /spots/{id}/reviews`
 
-Requires a bearer token for a student account. Each student reviews a spot at most once; editing and deleting a review are not available yet. The spot comes from the path and the author from the token, so a body that names `spot`, `author`, `created_at`, or any other unlisted field returns `422 validation_error`.
+Requires a bearer token for a student account. Each student can have one review per spot. The API takes the spot from the path and the author from the token. A body that names `spot`, `author`, `created_at`, or any other unlisted field returns `422 validation_error`.
 
 ```shell
 curl -X POST "http://localhost:7501/spots/facdb:eec118768e15a5e03d3354abda7b00da/reviews"   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json"   -d '{"rating": 4, "noise": 5, "outlets": 2, "body": "Quiet upstairs, few outlets."}'
@@ -277,7 +280,8 @@ A created review returns `201`:
   "outlets": 2,
   "body": "Quiet upstairs, few outlets.",
   "created_at": "2026-11-18T20:51:03.120456Z",
-  "updated_at": "2026-11-18T20:51:03.120456Z"
+  "updated_at": "2026-11-18T20:51:03.120456Z",
+  "reply": null
 }
 ```
 
@@ -291,9 +295,39 @@ A created review returns `201`:
 
 ### `GET /spots/{id}/reviews`
 
-Public; no token is needed. Returns the same `items` and `pagination` envelope as [Listing study spots](#listing-study-spots), with the review shape above. The only query parameters are `limit` (1 to 100, default 20) and `offset` (default 0); any other parameter, or a value out of range, returns `422 validation_error`. An unknown spot returns `404 not_found`.
+Public. Returns the `items` and `pagination` fields from [Listing study spots](#listing-study-spots), plus `summary.average_rating`. The average uses the overall scores of every review for the spot, regardless of page size. It is `null` when the spot has no reviews. `pagination.total` is the full review count.
+
+The only query parameters are `limit` (1 to 100, default 20) and `offset` (default 0). The API returns `422 validation_error` for an unknown parameter or out-of-range value, and `404 not_found` for an unknown spot.
 
 Reviews are newest first, ordered by descending creation time and then descending review ID. `author.username` is `null` when the account has no username. A review never includes the author's email address.
+
+`reply` is `null` or a public object with `body`, `created_at`, and `updated_at`.
+
+### `GET /spots/{id}/reviews/viewer`
+
+Requires a bearer token. The response identifies the caller's role for the spot:
+
+- `{"kind":"student","own_review":null}` if a student has not reviewed it. If they have, `own_review` contains the full review, even when it is not on the current public page.
+- `{"kind":"owner"}` for the business account that currently owns the listing.
+- `{"kind":"reader"}` for any other signed-in account.
+
+The response is private and not stored in caches. Account-specific information is never included in the public review collection.
+
+### `PATCH` and `DELETE /spots/{id}/reviews/mine`
+
+Require a bearer token for a student account. The API identifies the review from the spot and the authenticated account.
+
+`PATCH` accepts any subset of the fields supported by `POST`. Omitted fields stay unchanged. Set an optional score to `null` or the text to `""` to clear it. The API returns the updated review with `200`, or `404` if it does not exist. Editing preserves the original creation date and any owner reply.
+
+`DELETE` returns `204` when the review is removed or already absent on an existing spot. Deleting a review also removes its reply. The student can then post a new review.
+
+### `PUT` and `DELETE /spots/{id}/reviews/{review_id}/reply`
+
+Require a bearer token for the business account that currently owns the listing. The API returns `404` for imported spots, another owner's listing, or a review that does not belong to the listing. Business owners cannot edit or delete the student's review.
+
+`PUT` accepts `{"body":"Thanks for the feedback."}`. The reply text is required, cannot be blank, and has a 2,000-character limit. The API returns the public reply with `201` on creation or `200` on update. Each review has at most one reply.
+
+`DELETE` returns `204` when the reply is removed or already absent on an existing review. Reviews and replies appear publicly as soon as the API saves them.
 
 ## Errors
 

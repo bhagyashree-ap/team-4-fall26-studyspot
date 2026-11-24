@@ -81,6 +81,7 @@ class TestCreating:
         assert {name: body[name] for name in REVIEW} == REVIEW
         assert body["spot"] == library.pk
         assert body["author"] == {"username": "ada"}
+        assert body["reply"] is None
         review = Review.objects.get(pk=body["id"])
         assert (review.spot, review.author) == (library, student)
 
@@ -236,6 +237,7 @@ class TestReading:
         assert response.json() == {
             "items": [],
             "pagination": {"limit": 20, "offset": 0, "count": 0, "total": 0, "has_more": False},
+            "summary": {"average_rating": None},
         }
 
     def test_only_this_spots_reviews(self, student: Account, library: StudySpot) -> None:

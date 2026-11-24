@@ -6,8 +6,10 @@ import uuid
 from typing import Any
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Expression, F, IntegerField, Q, QuerySet, Value
+from django.db.models import Avg, Count, Expression, F, IntegerField, Q, QuerySet, Value
 from django.db.models.functions import ASin, Cast, Cos, Least, Power, Radians, Round, Sin, Sqrt
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import never_cache
 from rest_framework import status
 from rest_framework.exceptions import APIException, NotFound, PermissionDenied
 from rest_framework.permissions import AllowAny, BasePermission, IsAuthenticated
@@ -18,13 +20,15 @@ from rest_framework.views import APIView
 from accounts.authentication import Auth0Authentication
 from accounts.models import Account, AccountType
 
-from .models import Review, StudySpot
+from .models import Review, ReviewReply, StudySpot
 from .search import expanded_words, search
 from .serializers import (
     Coordinates,
     ListingSerializer,
     NearbySpotSerializer,
     ReviewQuerySerializer,
+    ReviewReplySerializer,
+    ReviewReplyWriteSerializer,
     ReviewSerializer,
     ReviewWriteSerializer,
     SpotFacetsQuerySerializer,
@@ -351,6 +355,7 @@ def owned_listing(request: Request, spot_id: str, *, for_update: bool = False) -
         raise NotFound(f"You have no listing with the identifier {spot_id!r}.") from None
 
 
+@method_decorator(never_cache, name="dispatch")
 class ListingListView(APIView):
     """``GET /listings`` and ``POST /listings`` -- the caller's own listings."""
 
@@ -412,6 +417,15 @@ def violated_constraint(error: IntegrityError) -> str | None:
     return getattr(diagnostics, "constraint_name", None)
 
 
+def review_spot(spot_id: str, *, for_update: bool = False) -> StudySpot:
+    """Mutations take the parent lock so listing deletion sees every committed child."""
+    spots = StudySpot.objects.select_for_update() if for_update else StudySpot.objects
+    try:
+        return spots.get(pk=spot_id)
+    except StudySpot.DoesNotExist:
+        raise NotFound(f"No study spot has the identifier {spot_id!r}.") from None
+
+
 class SpotReviewsView(APIView):
     """``GET`` and ``POST /spots/{id}/reviews`` -- a spot's reviews.
 
@@ -435,18 +449,18 @@ class SpotReviewsView(APIView):
         if not StudySpot.objects.filter(pk=spot_id).exists():
             raise NotFound(f"No study spot has the identifier {spot_id!r}.")
 
-        # Newest first; the id breaks ties between reviews made in the same
-        # instant, so paging never repeats or skips one.
         reviews = (
             Review.objects.filter(spot_id=spot_id)
-            .select_related("author")
+            .select_related("author", "reply")
             .order_by("-created_at", "-id")
         )
-        total = reviews.count()
+        summary = reviews.aggregate(average_rating=Avg("rating"), total=Count("id"))
+        total = summary["total"]
         items = ReviewSerializer(reviews[offset : offset + limit], many=True).data
         return Response(
             {
                 "items": items,
+                "summary": {"average_rating": summary["average_rating"]},
                 "pagination": {
                     "limit": limit,
                     "offset": offset,
@@ -461,12 +475,7 @@ class SpotReviewsView(APIView):
         account = student_account(request)
         try:
             with transaction.atomic():
-                try:
-                    # Locked as favourites lock it, so a listing deleted at the
-                    # same moment either cascades this review or answers 404.
-                    spot = StudySpot.objects.select_for_update().get(pk=spot_id)
-                except StudySpot.DoesNotExist:
-                    raise NotFound(f"No study spot has the identifier {spot_id!r}.") from None
+                spot = review_spot(spot_id, for_update=True)
                 serializer = ReviewWriteSerializer(data=request.data)
                 serializer.is_valid(raise_exception=True)
                 # No existence check first: the unique constraint decides, which
@@ -477,3 +486,88 @@ class SpotReviewsView(APIView):
                 raise ReviewConflict() from error
             raise
         return Response(ReviewSerializer(review).data, status=status.HTTP_201_CREATED)
+
+
+@method_decorator(never_cache, name="dispatch")
+class SpotReviewViewerView(APIView):
+    authentication_classes = [Auth0Authentication]
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request: Request, spot_id: str) -> Response:
+        spot = review_spot(spot_id)
+        account: Account = request.user.account
+        if account.account_type == AccountType.STUDENT:
+            review = (
+                Review.objects.filter(spot=spot, author=account)
+                .select_related("author", "reply")
+                .first()
+            )
+            return Response(
+                {
+                    "kind": "student",
+                    "own_review": ReviewSerializer(review).data if review is not None else None,
+                }
+            )
+        if account.account_type == AccountType.BUSINESS and spot.owner_id == account.pk:
+            return Response({"kind": "owner"})
+        return Response({"kind": "reader"})
+
+
+@method_decorator(never_cache, name="dispatch")
+class SpotOwnReviewView(APIView):
+    authentication_classes = [Auth0Authentication]
+    permission_classes = [IsAuthenticated]
+
+    @transaction.atomic
+    def patch(self, request: Request, spot_id: str) -> Response:
+        account = student_account(request)
+        spot = review_spot(spot_id, for_update=True)
+        try:
+            review = Review.objects.select_related("author", "reply").get(spot=spot, author=account)
+        except Review.DoesNotExist:
+            raise NotFound("You have not reviewed this study spot.") from None
+        serializer = ReviewWriteSerializer(review, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        return Response(ReviewSerializer(serializer.save()).data)
+
+    @transaction.atomic
+    def delete(self, request: Request, spot_id: str) -> Response:
+        account = student_account(request)
+        spot = review_spot(spot_id, for_update=True)
+        Review.objects.filter(spot=spot, author=account).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@method_decorator(never_cache, name="dispatch")
+class SpotReviewReplyView(APIView):
+    authentication_classes = [Auth0Authentication]
+    permission_classes = [IsAuthenticated]
+
+    def review(self, request: Request, spot_id: str, review_id: int) -> Review:
+        spot = owned_listing(request, spot_id, for_update=True)
+        try:
+            return Review.objects.get(pk=review_id, spot=spot)
+        except Review.DoesNotExist:
+            raise NotFound("No review has that identifier on this study spot.") from None
+
+    @transaction.atomic
+    def put(self, request: Request, spot_id: str, review_id: int) -> Response:
+        review = self.review(request, spot_id, review_id)
+        serializer = ReviewReplyWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reply, created = ReviewReply.objects.get_or_create(
+            review=review, defaults=serializer.validated_data
+        )
+        if not created and reply.body != serializer.validated_data["body"]:
+            reply.body = serializer.validated_data["body"]
+            reply.save(update_fields=["body", "updated_at"])
+        return Response(
+            ReviewReplySerializer(reply).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+    @transaction.atomic
+    def delete(self, request: Request, spot_id: str, review_id: int) -> Response:
+        review = self.review(request, spot_id, review_id)
+        ReviewReply.objects.filter(review=review).delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

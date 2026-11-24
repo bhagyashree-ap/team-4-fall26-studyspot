@@ -21,6 +21,7 @@ from .models import (
     MAX_LIMIT,
     Borough,
     Review,
+    ReviewReply,
     StudySpot,
 )
 
@@ -478,6 +479,27 @@ class ReviewWriteSerializer(serializers.ModelSerializer):
         return super().to_internal_value(data)
 
 
+class ReviewReplyWriteSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReviewReply
+        fields = ["body"]
+
+    def to_internal_value(self, data: Any) -> dict[str, Any]:
+        if isinstance(data, Mapping):
+            unknown = sorted(set(data) - set(self.fields))
+            if unknown:
+                raise serializers.ValidationError(
+                    {name: "This field cannot be set on a reply." for name in unknown}
+                )
+        return super().to_internal_value(data)
+
+
+class ReviewReplySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ReviewReply
+        fields = ["body", "created_at", "updated_at"]
+
+
 class ReviewSerializer(serializers.ModelSerializer):
     """A published review.
 
@@ -487,6 +509,7 @@ class ReviewSerializer(serializers.ModelSerializer):
 
     spot = serializers.CharField(source="spot_id", read_only=True)
     author = serializers.SerializerMethodField()
+    reply = ReviewReplySerializer(read_only=True, allow_null=True)
 
     class Meta:
         model = Review
@@ -502,6 +525,7 @@ class ReviewSerializer(serializers.ModelSerializer):
             "body",
             "created_at",
             "updated_at",
+            "reply",
         ]
 
     def get_author(self, review: Review) -> dict[str, str | None]:

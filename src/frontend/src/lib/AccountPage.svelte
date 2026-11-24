@@ -6,6 +6,7 @@
 	import SiteHeader from './SiteHeader.svelte';
 	import SignUpForm from './SignUpForm.svelte';
 	import StudentProfileEditor from './StudentProfileEditor.svelte';
+	import OwnedListings from './OwnedListings.svelte';
 	import type { CompleteSignUp } from './contract';
 	import { session as shared, type Session } from './session.svelte';
 
@@ -147,6 +148,10 @@
 				</dl>
 				{#if account.account_type === 'student'}
 					<StudentProfileEditor />
+				{:else if account.account_type === 'business'}
+					{#key session.generation}
+						<OwnedListings {session} />
+					{/key}
 				{/if}
 
 				<div class="actions">

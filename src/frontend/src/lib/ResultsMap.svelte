@@ -5,7 +5,7 @@
 	import { resolve } from '$app/paths';
 
 	import { boundsOf, contains, type Bounds } from './bounds';
-	import { place, readableCategory } from './spot';
+	import { place, readableCategory, spotPath } from './spot';
 	import type { StudySpot } from './contract';
 
 	type Props = {
@@ -62,7 +62,7 @@
 
 		const link = document.createElement('a');
 		link.className = 'name';
-		link.href = resolve(`/spots/${spot.id}` as '/');
+		link.href = resolve(spotPath(spot.id) as '/');
 		link.textContent = spot.name;
 
 		const where = document.createElement('p');

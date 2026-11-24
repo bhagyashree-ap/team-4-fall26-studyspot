@@ -4,7 +4,7 @@
 	import ResultsMap from './ResultsMap.svelte';
 	import { showsCampus } from './campus';
 	import { mapsUrl } from './maps';
-	import { formatDistance, place, readableCategory } from './spot';
+	import { formatDistance, place, readableCategory, spotPath } from './spot';
 	import { orderByTrunk, routeColour, routeTextColour, walkMinutes } from './subway';
 	import type { NearbySpot, StudySpot } from './contract';
 	import FavouriteButton from './FavouriteButton.svelte';
@@ -68,13 +68,9 @@
 	/**
 	 * Share a spot: the system sheet where there is one, the clipboard where
 	 * there is not.
-	 *
-	 * The link is the detail page, which is prerendered, so whoever receives it
-	 * opens real HTML rather than a shell that has to fetch before it can show
-	 * anything.
 	 */
 	async function share(spot: StudySpot): Promise<void> {
-		const url = new URL(resolve(`/spots/${spot.id}` as '/'), location.href).href;
+		const url = new URL(resolve(spotPath(spot.id) as '/'), location.href).href;
 		const payload = { title: spot.name, text: `${spot.name} — StudySpot`, url };
 
 		if (navigator.share && navigator.canShare?.(payload)) {
@@ -161,12 +157,7 @@
 				<li>
 					<div class="card-heading">
 						<h3>
-							<!--
-						Every detail page is prerendered, so this is a real document
-						rather than a route the browser has to assemble: the link
-						works on a fresh tab, in a shared message, and to a crawler.
-					-->
-							<a href={resolve(`/spots/${spot.id}` as '/')}>{spot.name}</a>
+							<a href={resolve(spotPath(spot.id) as '/')}>{spot.name}</a>
 						</h3>
 						<div class="save-control">
 							<FavouriteButton {spot} showLoadError={false} />

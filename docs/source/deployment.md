@@ -4,6 +4,10 @@ StudySpot has one deployment target: AWS. The SvelteKit frontend is prerendered 
 
 The `/favourites` route is a prerendered shell with no personal data. The existing CloudFront rewrite serves `/favourites.html` for direct visits and refreshes. The browser loads saved state through authenticated API requests. All favourites API responses, including errors, are `private` and `no-store`.
 
+Imported spot detail pages are prerendered from the snapshot. Business listings use the static shell at `/spots/listing?id={id}`, which loads the public spot in the browser. Both pages fetch reviews at runtime.
+
+Apply the review reply migration before serving the updated review API. Publish the frontend after the migrated API is ready.
+
 | Part | How it is served | Driven by |
 |---|---|---|
 | Frontend | S3 behind CloudFront, prerendered with `adapter-static` | `just aws-frontend` |
@@ -76,9 +80,9 @@ Locally the same step is `just load-data`, after `just start-db` and `just migra
 
 Search needs no separate deployed component. It is Postgres full text over a generated `tsvector` column, with `pg_trgm` similarity behind it for misspellings, so the only deployment step it requires is the migration that creates the column, the extension and their GIN indexes.
 
-Business-owned spots, accounts, and favourites are non-rebuildable user data. Backups and backward-compatible migrations are release requirements now. Use a consistent full-database backup or RDS snapshot, and restore spots, accounts, favourites, and migration history together. See [Backup and consistent restore](database.md#backup-and-consistent-restore) for retention, access, and restore requirements.
+Business-owned spots, accounts, favourites, reviews, and replies are not rebuildable. Use a consistent full-database backup or RDS snapshot. See [Backup and consistent restore](database.md#backup-and-consistent-restore).
 
-The feature-aware loader preserves favourites when imported spot IDs survive a refresh. It removes favourites only for imported IDs absent from the replacement. Business-owned spots and their favourites remain unchanged, including for an empty replacement. Validation errors, owned-ID collisions, and write failures leave all data unchanged. Review the replacement dataset before running `just aws-load`.
+The loader preserves reviews and favourites when imported spot IDs survive. Removing an imported ID removes its reviews and favourites. Business listings and their data stay unchanged. Review removed IDs before running `just aws-load`.
 
 The additive `accounts.0002` migration depends on `accounts.0001` and `spots.0012`. Deploy the feature-aware backend and management package, apply migrations, and then publish the favourites frontend. Take a recoverable backup before changing an existing database.
 
@@ -86,6 +90,8 @@ The additive `accounts.0002` migration depends on `accounts.0001` and `spots.001
 
 Choose an application revision compatible with the applied schema. Preserve the feature-aware management package when rolling back the API. Do not replace it with an older management package as part of the rollback. Republish the frontend from the chosen application revision with `just aws-frontend`.
 
-Normal application rollback leaves the additive favourites migration applied. Do not reverse it or reload an older snapshot to roll back application code. Reversing the migration deletes favourites, and an older snapshot can omit saved spot IDs.
+Leave the additive favourites and review reply migrations applied during an application rollback. Reversing them deletes saved data. Reloading an older snapshot can also remove associated data when the snapshot omits imported spot IDs.
+
+After replies have been written, keep a backend that knows the reply model on listing deletion requests. Older backend code does not include replies in Django's deletion cascade.
 
 Keep the feature-aware management package and `load_spots` command available after an application rollback. Do not run `just aws-load` from an older checkout against a database containing favourites. Compatibility of an older loader with saved relationships is an operational prerequisite, not an assumed property. If a schema or data restore is necessary, use a consistent full-database backup and account for writes made since that backup.

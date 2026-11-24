@@ -6,7 +6,7 @@
  */
 
 import { ApiError, isErrorEnvelope, type Fetcher } from './api';
-import type { Account, AuthConfig, CompleteSignUp, UsernameCheck } from './contract';
+import type { Account, AuthConfig, CompleteSignUp, StudySpot, UsernameCheck } from './contract';
 
 async function request<T>(path: string, init: RequestInit, fetcher: Fetcher): Promise<T> {
 	let response: Response;
@@ -18,6 +18,9 @@ async function request<T>(path: string, init: RequestInit, fetcher: Fetcher): Pr
 	} catch {
 		throw new ApiError('network_error', 'Could not reach the StudySpot API.', 0);
 	}
+
+	// Nothing to parse: a 204 carries no body, whichever method asked for it.
+	if (response.status === 204) return undefined as T;
 
 	let body: unknown;
 	try {
@@ -57,10 +60,26 @@ export function fetchAuthConfig(fetcher: Fetcher = globalThis.fetch): Promise<Au
  */
 export type Credentials = { access: string; id?: string };
 
-function authorization(credentials: Credentials): Record<string, string> {
+export function authenticatedRequest<T>(
+	path: string,
+	credentials: Credentials,
+	options: { method?: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE'; body?: unknown } = {},
+	fetcher: Fetcher = globalThis.fetch
+): Promise<T> {
+	const { method, body } = options;
 	const headers: Record<string, string> = { authorization: `Bearer ${credentials.access}` };
 	if (credentials.id) headers['x-id-token'] = credentials.id;
-	return headers;
+	if (body !== undefined) headers['content-type'] = 'application/json';
+	return request<T>(
+		path,
+		{
+			method,
+			headers,
+			body: body === undefined ? undefined : JSON.stringify(body),
+			cache: 'no-store'
+		},
+		fetcher
+	);
 }
 
 /**
@@ -73,7 +92,7 @@ export function fetchAccount(
 	credentials: Credentials,
 	fetcher: Fetcher = globalThis.fetch
 ): Promise<Account> {
-	return request<Account>('/api/account', { headers: authorization(credentials) }, fetcher);
+	return authenticatedRequest<Account>('/api/account', credentials, {}, fetcher);
 }
 
 /** Finish sign-up by saying which kind of account this is. Allowed once. */
@@ -82,15 +101,19 @@ export function completeSignUp(
 	choice: CompleteSignUp,
 	fetcher: Fetcher = globalThis.fetch
 ): Promise<Account> {
-	return request<Account>(
+	return authenticatedRequest<Account>(
 		'/api/account',
-		{
-			method: 'POST',
-			headers: { ...authorization(credentials), 'content-type': 'application/json' },
-			body: JSON.stringify(choice)
-		},
+		credentials,
+		{ method: 'POST', body: choice },
 		fetcher
 	);
+}
+
+export function listOwnedListings(
+	credentials: Credentials,
+	fetcher: Fetcher = globalThis.fetch
+): Promise<{ items: StudySpot[] }> {
+	return authenticatedRequest('/api/listings', credentials, {}, fetcher);
 }
 
 /** Whether a username is free, and if not, why, from `GET /usernames/{name}`. */

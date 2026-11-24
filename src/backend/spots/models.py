@@ -486,3 +486,13 @@ class Review(models.Model):
 
     def __str__(self) -> str:
         return f"Review {self.pk} of {self.spot_id}"
+
+
+class ReviewReply(models.Model):
+    review = models.OneToOneField(Review, on_delete=models.CASCADE, related_name="reply")
+    body = models.TextField(max_length=MAX_REVIEW_BODY)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self) -> str:
+        return f"Reply to review {self.review_id}"

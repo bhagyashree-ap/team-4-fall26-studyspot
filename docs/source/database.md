@@ -59,6 +59,12 @@ The additive `accounts.0002` migration depends on `accounts.0001` and `spots.001
 
 Favourites are user-owned data. Neither the public snapshot nor a new migration can recreate them. Normal application rollback leaves this migration applied and keeps the feature-aware loader. See [Rollback](deployment.md#rollback).
 
+### Reviews and owner replies
+
+`spots.Review` links a student account to a study spot. A database constraint allows one review per student and spot. `spots.ReviewReply` links one public reply to one review. The reply does not store a second owner. The API checks the listing's current owner before accepting a reply.
+
+Deleting a review removes its reply. Deleting a spot removes its reviews and their replies. Like favourites, reviews and replies cannot be recovered from the public snapshot. Keep the reply migration applied during an application rollback that must preserve replies.
+
 ### Why no column declares a collation
 
 Every text column uses the database's collation, including `id` and `name`, and that is deliberate rather than an omission.
@@ -82,7 +88,7 @@ NYC Open Data -> data/ingest.py -> data/spots.json -> load_spots -> spots table
                                                                  \-> search projection
 ```
 
-`data/spots.json` is the source of truth for imported study-spot fields. Those rows are a rebuildable projection of the snapshot. Postgres generates `search_vector` from each row. Business-owned study spots, accounts, and favourites are separate, non-rebuildable data in the same database.
+`data/spots.json` is the source of truth for imported study-spot fields. Those rows are a rebuildable projection of the snapshot. Postgres generates `search_vector` from each row. Business-owned study spots, accounts, favourites, reviews, and owner replies are not rebuildable from the snapshot.
 
 Load or reload the local database with:
 
@@ -92,17 +98,16 @@ just load-data
 
 The `load_spots` management command validates every record and rejects duplicate IDs across the entire snapshot before writing. Inside one transaction, it takes an exclusive lock on `spots`, rejects IDs that belong to business-owned spots, deletes absent imported IDs, and upserts imported records by stable ID.
 
-- Surviving imported IDs keep their favourite relationships and receive current display fields.
-- Absent imported IDs are deleted, and their favourites are removed by cascade. There is no unavailable-spot archive.
-- Business-owned spots and their favourites remain unchanged, including for an empty snapshot.
-- An empty snapshot intentionally removes all imported spots and their favourites.
-- Validation failures, business-owned ID collisions, and database write failures leave spots and favourites unchanged.
+- Surviving imported IDs keep their favourites and reviews and receive current display fields.
+- Absent imported IDs are deleted along with their favourites and reviews. There is no unavailable-spot archive.
+- Business-owned spots, their favourites, reviews, and owner replies survive, even with an empty snapshot.
+- Validation failures, business-owned ID collisions, and database write failures leave all data unchanged.
 
-Loading the same snapshot again preserves existing favourites. Pass `--dataset` to load a different snapshot. Review removed imported IDs before loading any replacement because restoring the public records later does not recreate deleted favourites.
+Loading the same snapshot again preserves favourites and reviews. Pass `--dataset` to load a different snapshot. Review removed imported IDs before loading a replacement. Restoring the public spots later does not recreate their deleted data.
 
 Saving locks the target spot row before creating the favourite. That lock and the loader's table lock serialize overlapping saves and refreshes. Concurrent loaders also serialize.
 
-Deleting a business-owned spot through the API locks the spot before Django collects cascading favourites. A concurrent save either commits before that cascade or waits and receives `404` after deletion.
+Review and reply writes lock the spot before changing a child row. Listing deletion locks the same spot before collecting favourites, reviews, and replies. A concurrent write either commits before deletion or waits and receives `404` after deletion.
 
 On AWS the same command runs inside a Lambda function:
 
