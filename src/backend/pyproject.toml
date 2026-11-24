@@ -87,10 +87,20 @@ DJANGO_SETTINGS_MODULE = "studyspot.settings_test"
 testpaths = ["spots", "accounts", "communities", "board"]
 addopts = ["-ra", "--strict-markers"]
 
+[tool.coverage.run]
+source = ["accounts", "board", "communities", "spots", "studyspot"]
+omit = ["*/migrations/*", "*/tests/*", "*/asgi.py", "*/wsgi.py", "*/settings_test.py"]
+
+[tool.coverage.report]
+fail_under = 85
+show_missing = true
+skip_empty = true
+
 [dependency-groups]
 dev = [
     "pre-commit>=4.6.2",
     "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
     "pytest-django>=4.11.1",
     "ruff>=0.16.7",
     "ty>=0.0.80",

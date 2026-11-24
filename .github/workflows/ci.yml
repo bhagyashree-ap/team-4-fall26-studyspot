@@ -89,6 +89,15 @@ jobs:
       - name: Run tests
         run: just test
 
+      - name: Upload coverage to Coveralls
+        if: always() && !cancelled()
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ github.token }}
+          file: coverage/backend.xml
+          format: cobertura
+          allow-empty: true
+
   terraform:
     name: Terraform
     runs-on: ubuntu-latest

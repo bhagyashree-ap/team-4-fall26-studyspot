@@ -3,6 +3,7 @@
 - `ci.yml` installs locked dependencies and runs `just check` on every pull request and push to `develop` or `main`.
 - `compose.yml` builds the four-service local topology, waits for healthy containers, and checks the frontend and API liveness endpoint.
 - `ci.yml` builds the warning-free Sphinx documentation as part of `just check`. The documentation is not published anywhere.
+- `just test` reports backend line coverage and enforces an 85% minimum. CI uploads the Cobertura report to Coveralls for the `develop` badge using GitHub Actions' built-in token; no Coveralls token is stored in the repository.
 
 There is no automatic deployment. AWS is applied by hand with `just aws-*` from a checkout with credentials, so GitHub Actions needs no deployment secrets of any kind.
 
