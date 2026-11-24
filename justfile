@@ -98,7 +98,8 @@ makemigrations:
 
 # Run the backend and data test suites. Needs Postgres: `just start-db`.
 test:
-    cd src/backend && uv run pytest
+    mkdir -p coverage
+    cd src/backend && uv run pytest --cov --cov-report=term-missing --cov-report=xml:../../coverage/backend.xml
     cd data && uv run --project ../src/backend pytest .
 
 # Refresh the subway station list the detail pages measure against. Rarely
