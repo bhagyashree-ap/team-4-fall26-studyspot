@@ -4,6 +4,7 @@
 	import type { StudySpot } from './contract';
 	import { favourites as sharedFavourites, type Favourites } from './favourites.svelte';
 	import { session as sharedSession, type Session } from './session.svelte';
+	import { spotPath } from './spot';
 
 	let {
 		spot,
@@ -18,7 +19,7 @@
 	} = $props();
 	let prompt = $state(false);
 	let loginError = $state('');
-	const origin = $derived(`/spots/${spot.id}`);
+	const origin = $derived(spotPath(spot.id));
 	const saved = $derived(favourites.saved(spot.id));
 	const action = $derived(favourites.action(spot.id));
 	const eligible = $derived(

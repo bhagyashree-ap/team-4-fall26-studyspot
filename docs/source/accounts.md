@@ -39,13 +39,23 @@ Only completed student accounts can save, list, or remove favourites. The API ch
 
 Search results and study-spot detail pages offer **Save** and **Unsave** controls. On result cards, these controls sit beside the spot title, separate from the **Maps** and **Share** actions below. Completed students also have a **Favourites** page at `/favourites`, with removal controls and list/map views of their saved spots. Business accounts have no favourites controls.
 
-When a visitor selects **Save**, an inline prompt offers login or signup. After authentication and any required account completion, the browser returns to the originating `/spots/{id}` page. The continuation survives email-verification refreshes and manual completion. It accepts only same-origin paths, belongs to the current login journey, and is cleared on logout or an unrelated journey. It never contains a saved-action instruction. The student must select **Save** again.
+When a visitor selects **Save**, an inline prompt offers login or signup. After authentication and any required account completion, the browser returns to the originating spot page. The continuation survives email-verification refreshes and manual completion. It accepts only same-origin paths, belongs to the current login journey, and is cleared on logout or an unrelated journey. It never contains a saved-action instruction. The student must select **Save** again.
 
 Each account's favourites are private. The server derives ownership from the authenticated account, never from an account ID supplied by the browser. The browser uses the access token's stable subject to scope its saved state, not an email or a username. It clears that state on logout or account changes, including changes signaled by another tab. A recoverable action failure preserves the last confirmed state and offers a retry rather than reporting success.
 
 Only an authorization failure belonging to the active favourites scope can invalidate the session. Errors from an obsolete operation do not invalidate a recovered session. An API `409` clears the favourites collection while account eligibility is rechecked. Reads and actions started before that rejection cannot restore saved state afterward, even within the same login session.
 
 The `/favourites` HTML is a prerendered shell with no personal data. The browser loads the current student's list through authenticated requests. Favourite API responses, including errors, are private and not stored in caches. See the [Favourites API](api.md#favourites) for pagination, ordering, and idempotent save and removal behavior.
+
+## Reviews and ratings
+
+Open a spot's **Reviews** section to see its overall rating and review count. Select **Show more** to read older reviews. You can read reviews without signing in.
+
+Students can select **Write a review** and give the spot an overall score. Aspect scores and text are optional. Use **Your review** to edit or delete your own review, even if it is not on the first page.
+
+Business owners can open **Account**, then select a spot under **Your listings** to read its reviews. The current owner can post, edit, or remove one public reply under each review of the listing. Imported spots have no listing owner and cannot receive an owner reply.
+
+See the [Reviews API](api.md#reviews) for rating, reply, and access rules.
 
 ## Setting up Auth0
 

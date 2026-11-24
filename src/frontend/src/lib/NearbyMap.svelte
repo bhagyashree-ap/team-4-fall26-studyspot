@@ -2,6 +2,7 @@
 	import { resolve } from '$app/paths';
 	import type { StudySpot } from './contract';
 	import type { Nearby } from './server/snapshot';
+	import { spotPath } from './spot';
 
 	let { spot, nearby }: { spot: StudySpot; nearby: Nearby[] } = $props();
 
@@ -86,7 +87,7 @@
 				for (const entry of nearby) {
 					const link = document.createElement('a');
 					link.className = 'pin';
-					link.href = resolve(`/spots/${entry.spot.id}` as '/');
+					link.href = resolve(spotPath(entry.spot.id) as '/');
 					link.title = `${entry.spot.name} — ${Math.round(entry.metres)} m away`;
 					link.setAttribute('aria-label', link.title);
 					new maplibre.Marker({ element: link })

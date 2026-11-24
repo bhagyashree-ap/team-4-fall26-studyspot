@@ -426,7 +426,8 @@ describe('listReviews', () => {
 	const empty = () =>
 		json({
 			items: [],
-			pagination: { limit: 20, offset: 0, count: 0, total: 0, has_more: false }
+			pagination: { limit: 20, offset: 0, count: 0, total: 0, has_more: false },
+			summary: { average_rating: null }
 		});
 
 	it("requests the newest page of the spot's reviews, escaping the identifier", async () => {

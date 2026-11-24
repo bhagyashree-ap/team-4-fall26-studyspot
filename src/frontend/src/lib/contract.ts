@@ -239,6 +239,12 @@ export type NearbySpotPage = {
 	pagination: Pagination;
 };
 
+export type ReviewReply = {
+	body: string;
+	created_at: string;
+	updated_at: string;
+};
+
 /**
  * One student's review of one spot, from `GET /spots/{id}/reviews`.
  *
@@ -252,22 +258,29 @@ export type Review = {
 	spot: string;
 	/** `username` is null when the account has none. Never an email address. */
 	author: { username: string | null };
+	reply: ReviewReply | null;
+	created_at: string;
+	updated_at: string;
+} & ReviewDraft;
+
+export type ReviewDraft = {
 	rating: number;
 	noise: number | null;
 	wifi: number | null;
 	seating: number | null;
 	outlets: number | null;
-	/** `""` when the author wrote nothing. */
 	body: string;
-	created_at: string;
-	updated_at: string;
 };
 
 /** Newest first: by descending creation time, then descending review ID. */
 export type ReviewPage = {
 	items: Review[];
 	pagination: Pagination;
+	summary: { average_rating: number | null };
 };
+
+export type ReviewViewer =
+	{ kind: 'student'; own_review: Review | null } | { kind: 'owner' } | { kind: 'reader' };
 
 /** One specific problem with a request. */
 export type ErrorDetail = {

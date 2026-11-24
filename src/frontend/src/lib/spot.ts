@@ -8,6 +8,10 @@
 
 import type { StudySpot } from './contract';
 
+export function spotPath(id: string): string {
+	return id.startsWith('listing:') ? `/spots/listing?id=${encodeURIComponent(id)}` : `/spots/${id}`;
+}
+
 /**
  * The importer's vocabulary is snake_case (`academic_library`), because the
  * category belongs to the data rather than to the interface. Presenting it is
