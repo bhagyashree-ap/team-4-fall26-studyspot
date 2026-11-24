@@ -13,6 +13,7 @@ import type {
 	Facets,
 	Near,
 	NearbySpotPage,
+	ReviewPage,
 	SpotFilters,
 	SpotPage
 } from './contract';
@@ -178,6 +179,29 @@ export function listSpotsNear(near: Near, options: SearchOptions = {}): Promise<
 	}
 
 	return get<NearbySpotPage>('/api/spots', parameters, fetcher);
+}
+
+export type ReviewOptions = {
+	limit?: number;
+	offset?: number;
+	fetcher?: Fetcher;
+};
+
+/**
+ * Fetch one page of a spot's reviews, newest first.
+ *
+ * Public, so no token is sent. Called from the browser at runtime rather than
+ * at build time: detail pages are prerendered, and reviews written after the
+ * build would otherwise never appear.
+ */
+export function listReviews(spotId: string, options: ReviewOptions = {}): Promise<ReviewPage> {
+	const { limit = DEFAULT_LIMIT, offset = 0, fetcher = globalThis.fetch } = options;
+
+	return get<ReviewPage>(
+		`/api/spots/${encodeURIComponent(spotId)}/reviews`,
+		new URLSearchParams({ limit: String(limit), offset: String(offset) }),
+		fetcher
+	);
 }
 
 export type FacetOptions = {

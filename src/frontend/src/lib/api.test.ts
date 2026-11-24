@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ApiError, fetchFacets, listSpots, listSpotsNear, searchSpots } from './api';
+import { ApiError, fetchFacets, listReviews, listSpots, listSpotsNear, searchSpots } from './api';
 import type { SpotPage } from './contract';
 
 /** A page shaped like the API's, with as many identical items as asked for. */
@@ -419,5 +419,34 @@ describe('fetchFacets', () => {
 		const failure = await fetchFacets({ fetcher }).catch((error: unknown) => error);
 
 		expect((failure as ApiError).code).toBe('network_error');
+	});
+});
+
+describe('listReviews', () => {
+	const empty = () =>
+		json({
+			items: [],
+			pagination: { limit: 20, offset: 0, count: 0, total: 0, has_more: false }
+		});
+
+	it("requests the newest page of the spot's reviews, escaping the identifier", async () => {
+		const { urls, fetcher } = recorder(empty);
+
+		const result = await listReviews('facdb:bobst', { fetcher });
+
+		expect(result.items).toEqual([]);
+		expect(urls).toEqual(['/api/spots/facdb%3Abobst/reviews?limit=20&offset=0']);
+	});
+
+	it('reports an unknown spot with the code the API gave', async () => {
+		const { fetcher } = recorder(() =>
+			json({ error: { code: 'not_found', message: 'No such spot.', details: [] } }, 404)
+		);
+
+		const failure = await listReviews('facdb:gone', { fetcher }).catch((error: unknown) => error);
+
+		expect(failure).toBeInstanceOf(ApiError);
+		expect((failure as ApiError).code).toBe('not_found');
+		expect((failure as ApiError).status).toBe(404);
 	});
 });

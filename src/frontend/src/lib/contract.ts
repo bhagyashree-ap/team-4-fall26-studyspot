@@ -239,6 +239,36 @@ export type NearbySpotPage = {
 	pagination: Pagination;
 };
 
+/**
+ * One student's review of one spot, from `GET /spots/{id}/reviews`.
+ *
+ * Every score is a whole number from 1 to 5, and on every score 5 is the best
+ * answer -- including `noise`, where 5 means very quiet. An optional score the
+ * author left out is `null`.
+ */
+export type Review = {
+	id: number;
+	/** The reviewed spot's identifier. */
+	spot: string;
+	/** `username` is null when the account has none. Never an email address. */
+	author: { username: string | null };
+	rating: number;
+	noise: number | null;
+	wifi: number | null;
+	seating: number | null;
+	outlets: number | null;
+	/** `""` when the author wrote nothing. */
+	body: string;
+	created_at: string;
+	updated_at: string;
+};
+
+/** Newest first: by descending creation time, then descending review ID. */
+export type ReviewPage = {
+	items: Review[];
+	pagination: Pagination;
+};
+
 /** One specific problem with a request. */
 export type ErrorDetail = {
 	field: string | null;

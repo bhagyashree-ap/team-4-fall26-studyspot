@@ -3,6 +3,7 @@
 	import type { StudySpot } from '$lib/contract';
 	import NearbyMap from '$lib/NearbyMap.svelte';
 	import FavouriteButton from '$lib/FavouriteButton.svelte';
+	import ReviewList from '$lib/ReviewList.svelte';
 	import SiteHeader from '$lib/SiteHeader.svelte';
 	import { showsCampus } from '$lib/campus';
 	import { mapsUrl } from '$lib/maps';
@@ -214,6 +215,8 @@
 				Open in Maps ↗
 			</a>
 		</article>
+
+		<ReviewList spotId={spot.id} />
 
 		{#if data.nearby.length > 0}
 			<section aria-labelledby="nearby-title">
