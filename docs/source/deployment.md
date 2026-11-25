@@ -6,6 +6,8 @@ The `/favourites` route is a prerendered shell with no personal data. The existi
 
 Imported spot detail pages are prerendered from the snapshot. Business listings use the static shell at `/spots/listing?id={id}`, which loads the public spot in the browser. Both pages fetch reviews at runtime.
 
+Student profiles work the same way, for the same reason: the usernames are not known at build time, so `/people/profile?username={username}` is one prerendered shell that loads the public profile in the browser. Every route must set `prerender = true`; a route that does not is never written to the bucket, and a direct visit to it answers 404 rather than falling back to the app.
+
 Apply the review reply migration before serving the updated review API. Publish the frontend after the migrated API is ready.
 
 | Part | How it is served | Driven by |

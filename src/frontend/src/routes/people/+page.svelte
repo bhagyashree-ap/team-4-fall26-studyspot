@@ -227,8 +227,10 @@
 							</div>
 							<div class="details">
 								<h3>
-									<a href={resolve(`/people/${encodeURIComponent(person.username)}`)}
-										>{person.display_name}</a
+									<a
+										href={resolve(
+											`/people/profile?username=${encodeURIComponent(person.username)}` as '/'
+										)}>{person.display_name}</a
 									>
 								</h3>
 								{#if person.school}<p>{person.school}</p>{/if}{#if person.courses?.length}<p>
