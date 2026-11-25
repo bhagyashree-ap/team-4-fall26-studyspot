@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -16,14 +15,26 @@
 	let profile = $state<Profile | null>(null);
 	let error = $state('');
 	let busy = $state(false);
-	onMount(() => {
-		const username = page.params.username ?? '';
+	/** Answers to a username that is no longer the one on screen are dropped. */
+	let request = 0;
+
+	$effect(() => {
+		const username = page.url.searchParams.get('username') ?? '';
+		const sequence = ++request;
+		profile = null;
+		if (!username) {
+			error = 'This link does not say whose profile to show.';
+			return;
+		}
+		error = '';
 		void communityRequest<Profile>(`/people/${encodeURIComponent(username)}`)
-			.then((value) => (profile = value))
-			.catch(
-				(cause: unknown) =>
-					(error = cause instanceof Error ? cause.message : 'Profile unavailable.')
-			);
+			.then((value) => {
+				if (sequence === request) profile = value;
+			})
+			.catch((cause: unknown) => {
+				if (sequence === request)
+					error = cause instanceof Error ? cause.message : 'Profile unavailable.';
+			});
 	});
 	async function message() {
 		if (!profile) return;
